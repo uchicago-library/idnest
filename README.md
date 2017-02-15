@@ -94,7 +94,7 @@ $ curl -s 127.0.0.1:5000/e0724e3ca9a645f2be83d780f0394ede/ | python -m json.tool
 
 Delete a container
 ```
-[10:54AM][brian@speck ~]$ curl -s 127.0.0.1:5000/e0724e3ca9a645f2be83d780f0394ede/ -X DELETE | python -m json.tool
+$ curl -s 127.0.0.1:5000/e0724e3ca9a645f2be83d780f0394ede/ -X DELETE | python -m json.tool
 {
     "Deleted": true,
     "_self": {

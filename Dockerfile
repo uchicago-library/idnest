@@ -5,4 +5,4 @@ RUN python setup.py install
 RUN pip install gunicorn
 ARG PORT="8910"
 ENV PORT=$PORT
-CMD gunicorn idnest:app -w 4 -b 0.0.0.0:${PORT}
+CMD gunicorn idnest:app -w 9 -b 0.0.0.0:${PORT}

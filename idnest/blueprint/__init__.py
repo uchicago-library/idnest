@@ -1,5 +1,6 @@
 from uuid import uuid4
 from abc import ABCMeta, abstractmethod
+import logging
 
 from flask import Blueprint, abort
 from flask_restful import Resource, Api, reqparse
@@ -20,6 +21,9 @@ BLUEPRINT.config = {
 
 
 API = Api(BLUEPRINT)
+
+
+log = logging.getLogger(__name__)
 
 
 class IStorageBackend(metaclass=ABCMeta):
@@ -195,11 +199,14 @@ def get_backend():
 
 class Root(Resource):
     def post(self):
+        log.info("Received POST @ root endpoint")
+        log.debug("Parsing arguments")
         parser = reqparse.RequestParser()
         parser.add_argument('num', type=int,
                             help="How many containers to mint.",
                             default=1)
         args = parser.parse_args()
+        log.debug("Arguments parsed")
         return {
             "Minted": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
                        x in get_backend().mint_containers(args['num'])],
@@ -207,6 +214,7 @@ class Root(Resource):
         }
 
     def get(self):
+        log.info("Received GET @ root endpoint")
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
                            x in get_backend().ls_containers()],
@@ -216,10 +224,13 @@ class Root(Resource):
 
 class Container(Resource):
     def post(self, container_id):
+        log.info("Received POST @ Container endpoint")
+        log.debug("Parsing args")
         parser = reqparse.RequestParser()
         parser.add_argument('member', type=str, help="The member id to add",
                             action="append", required=True)
         args = parser.parse_args()
+        log.debug("Args parsed")
         try:
             return {
                 "Added": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
@@ -227,9 +238,11 @@ class Container(Resource):
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
+            log.critical("Container with id {} not found".format(container_id))
             abort(404)
 
     def get(self, container_id):
+        log.info("Received GET @ Container endpoint")
         try:
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
@@ -237,9 +250,11 @@ class Container(Resource):
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
+            log.critical("Container with id {} not found".format(container_id))
             abort(404)
 
     def delete(self, container_id):
+        log.info("Received DELETE @ Container endpoint")
         try:
             get_backend().rm_container(container_id)
             return {
@@ -247,11 +262,13 @@ class Container(Resource):
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
+            log.critical("Container with id {} not found".format(container_id))
             abort(404)
 
 
 class Member(Resource):
     def get(self, container_id, member_id):
+        log.info("Received GET @ Member endpoint")
         try:
             if member_id in get_backend().ls_members(container_id):
                 return {
@@ -261,9 +278,13 @@ class Member(Resource):
             else:
                 raise KeyError
         except KeyError:
+            log.critical("Container with id {} ".format(container_id) +
+                        "or member with id {} ".format(member_id) +
+                        "not found")
             abort(404)
 
     def delete(self, container_id, member_id):
+        log.info("Received DELETE @ Member endpoint")
         try:
             get_backend().rm_member(container_id, member_id)
             return {
@@ -272,6 +293,9 @@ class Member(Resource):
                 "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
+            log.critical("Container with id {} ".format(container_id) +
+                        "or member with id {} ".format(member_id) +
+                        "not found")
             abort(404)
 
 # Let the application context clober any config options here
@@ -283,6 +307,11 @@ def handle_configs(setup_state):
         client = MongoClient(BLUEPRINT.config.get("MONGO_HOST"),
                              BLUEPRINT.config.get("MONGO_PORT"))
         MongoStorageBackend.db = client[BLUEPRINT.config.get("MONGO_DB")]
+    if BLUEPRINT.config.get("VERBOSITY"):
+        logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])
+    else:
+        logging.basicConfig(level="WARN")
+
 
 API.add_resource(Root, "/")
 # Trailing slash as a reminder that this is "directory-esque"

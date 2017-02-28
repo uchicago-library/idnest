@@ -2,7 +2,7 @@ from uuid import uuid4
 from abc import ABCMeta, abstractmethod
 import logging
 
-from flask import Blueprint, abort
+from flask import Blueprint, abort, Response
 from flask_restful import Resource, Api, reqparse
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -197,6 +197,13 @@ def get_backend():
         return RAMStorageBackend
 
 
+def output_html(data, code, headers=None):
+    # https://github.com/flask-restful/flask-restful/issues/124
+    resp = Response(data, mimetype='text/html', headers=headers)
+    resp.status_code = code
+    return resp
+
+
 class Root(Resource):
     def post(self):
         log.info("Received POST @ root endpoint")
@@ -220,6 +227,48 @@ class Root(Resource):
                            x in get_backend().ls_containers()],
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
+
+class HTMLMint(Resource):
+    def get(self):
+        log.info("Received GET @ HTML mint endpoint")
+        resp = """<html>
+    <body>
+        <h1>
+		Mint a Container Identifier
+        </h1>
+        <form action=".."
+        method="post">
+        <p>
+		<div>
+        <input type="submit" value="Mint">
+        </div>
+        </form>
+    </body>
+</html>"""
+        return output_html(resp, 200)
+
+
+class HTMLMemberAdd(Resource):
+    def get(self, container_id):
+        log.info("Received GET @ HTML member add endpoint")
+        resp = """<html>
+    <body>
+        <h1>
+        Add a member to Container {}
+        </h1>
+        <form action="../{}/"
+        method="post">
+		<p>
+        Member Identifier:<br>
+        <input type="text" name="member" size="30">
+        </p>
+		<div>
+        <input type="submit" value="Add">
+        </div>
+        </form>
+    </body>
+</html>""".format(container_id, container_id)
+        return output_html(resp, 200)
 
 
 class Container(Resource):
@@ -314,6 +363,8 @@ def handle_configs(setup_state):
 
 
 API.add_resource(Root, "/")
+API.add_resource(HTMLMint, "/mint")
+API.add_resource(HTMLMemberAdd, "/<string:container_id>/add")
 # Trailing slash as a reminder that this is "directory-esque"
 API.add_resource(Container, "/<string:container_id>/")
 API.add_resource(Member, "/<string:container_id>/<string:member_id>")

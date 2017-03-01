@@ -236,7 +236,7 @@ class HTMLMint(Resource):
         <h1>
 		Mint a Container Identifier
         </h1>
-        <form action=".."
+        <form action="."
         method="post">
         <p>
 		<div>
@@ -256,7 +256,7 @@ class HTMLMemberAdd(Resource):
         <h1>
         Add a member to Container {}
         </h1>
-        <form action="../{}/"
+        <form action="./{}/"
         method="post">
 		<p>
         Member Identifier:<br>

@@ -242,12 +242,15 @@ class Root(Resource):
         parser = pagination_args_parser.copy()
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
-        paginated_ids = get_backend().ls_containers()[args['offset']:args['offset']+args['limit']]
+        all_ids = get_backend().ls_containers()
+        total_containers = len(all_ids)
+        paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
                            x in paginated_ids],
             "offset": args['offset'],
             "limit": args['limit'],
+            "total": total_containers,
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
 
@@ -319,12 +322,15 @@ class Container(Resource):
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
         try:
-            paginated_ids = get_backend().ls_members(container_id)[args['offset']:args['offset']+args['limit']]
+            all_ids = get_backend().ls_members(container_id)
+            total_members = len(all_ids)
+            paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
                             x in paginated_ids],
                 "offset": args['offset'],
                 "limit": args['limit'],
+                "total": total_members,
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:

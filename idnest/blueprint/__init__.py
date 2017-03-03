@@ -323,6 +323,8 @@ class Container(Resource):
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
                             x in paginated_ids],
+                "offset": args['offset'],
+                "limit": args['limit'],
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:

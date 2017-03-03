@@ -13,7 +13,7 @@ BLUEPRINT = Blueprint('idnest', __name__)
 
 
 BLUEPRINT.config = {
-    'STORAGE_BACKEND': "RAM",  # Default to just using dicts/sets
+    'STORAGE_BACKEND': "RAM",  # Default to just using dicts/lists
     'MONGO_HOST': 'localhost',        # If the app says to use mongo
     'MONGO_PORT': 27017,              # but specifies no other relevant info
     'MONGO_DB': "tmp_"+uuid4().hex,   # then use sensible defaults
@@ -109,7 +109,7 @@ class RAMStorageBackend(IStorageBackend):
     @classmethod
     def mint_container(cls):
         new_c_id = uuid4().hex
-        cls.data[new_c_id] = set()
+        cls.data[new_c_id] = []
         return new_c_id
 
     @classmethod
@@ -123,7 +123,7 @@ class RAMStorageBackend(IStorageBackend):
 
     @classmethod
     def add_member(cls, c_id, m_id):
-        cls.data[c_id].add(m_id)
+        cls.data[c_id].append(m_id)
         return m_id
 
     @classmethod
@@ -133,7 +133,7 @@ class RAMStorageBackend(IStorageBackend):
 
     @classmethod
     def ls_members(cls, c_id):
-        return set(cls.data[c_id])
+        return cls.data[c_id]
 
 
 class MongoStorageBackend(IStorageBackend):
@@ -182,7 +182,7 @@ class MongoStorageBackend(IStorageBackend):
                 raise KeyError
         except InvalidId:
             raise KeyError
-        return set(c['members'])
+        return c['members']
 
 
 # Assigning the backend to use needs to be diferred until after the configs
@@ -203,6 +203,21 @@ def output_html(data, code, headers=None):
     resp.status_code = code
     return resp
 
+pagination_args_parser = reqparse.RequestParser()
+pagination_args_parser.add_argument(
+    'offset', type=int, default=0
+)
+pagination_args_parser.add_argument(
+    'limit', type=int, default=10
+)
+
+def check_limit(limit):
+    if limit > BLUEPRINT.config.get("MAX_LIMIT", 1000):
+        log.warn(
+            "Received request above MAX_LIMIT (or 1000 if undefined), capping.")
+        limit = BLUEPRINT.config.get("MAX_LIMIT", 1000)
+    return limit
+
 
 class Root(Resource):
     def post(self):
@@ -213,6 +228,7 @@ class Root(Resource):
                             help="How many containers to mint.",
                             default=1)
         args = parser.parse_args()
+        args['num'] = check_limit(args['num'])
         log.debug("Arguments parsed")
         return {
             "Minted": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
@@ -222,9 +238,16 @@ class Root(Resource):
 
     def get(self):
         log.info("Received GET @ root endpoint")
+        log.debug("Parsing args")
+        parser = pagination_args_parser.copy()
+        args = parser.parse_args()
+        args['limit'] = check_limit(args['limit'])
+        paginated_ids = get_backend().ls_containers()[args['offset']:args['offset']+args['limit']]
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
-                           x in get_backend().ls_containers()],
+                           x in paginated_ids],
+            "offset": args['offset'],
+            "limit": args['limit'],
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
 
@@ -292,10 +315,14 @@ class Container(Resource):
 
     def get(self, container_id):
         log.info("Received GET @ Container endpoint")
+        parser = pagination_args_parser.copy()
+        args = parser.parse_args()
+        args['limit'] = check_limit(args['limit'])
         try:
+            paginated_ids = get_backend().ls_members(container_id)[args['offset']:args['offset']+args['limit']]
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
-                            x in get_backend().ls_members(container_id)],
+                            x in paginated_ids],
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:

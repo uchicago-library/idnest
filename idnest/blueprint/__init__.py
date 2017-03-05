@@ -4,7 +4,7 @@ import logging
 
 from flask import Blueprint, abort, Response
 from flask_restful import Resource, Api, reqparse
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 
@@ -67,7 +67,7 @@ class IStorageBackend(metaclass=ABCMeta):
 
     @classmethod
     @abstractmethod
-    def ls_containers(cls):
+    def ls_containers(cls, offset=0, limit=None):
         pass
 
     @classmethod
@@ -85,7 +85,7 @@ class IStorageBackend(metaclass=ABCMeta):
 
     @classmethod
     @abstractmethod
-    def ls_members(cls, c_id):
+    def ls_members(cls, c_id, offset=0, limit=None):
         pass
 
     @classmethod
@@ -118,8 +118,12 @@ class RAMStorageBackend(IStorageBackend):
         return c_id
 
     @classmethod
-    def ls_containers(cls):
-        return list(cls.data.keys())
+    def ls_containers(cls, offset=0, limit=None):
+        if limit:
+            end_index = offset+limit
+        else:
+            end_index = None
+        return list(cls.data.keys())[offset:end_index]
 
     @classmethod
     def add_member(cls, c_id, m_id):
@@ -132,8 +136,12 @@ class RAMStorageBackend(IStorageBackend):
         return m_id
 
     @classmethod
-    def ls_members(cls, c_id):
-        return cls.data[c_id]
+    def ls_members(cls, c_id, offset=0, limit=None):
+        if limit:
+            end_index = offset+limit
+        else:
+            end_index = None
+        return cls.data[c_id][offset:end_index]
 
 
 class MongoStorageBackend(IStorageBackend):
@@ -157,8 +165,11 @@ class MongoStorageBackend(IStorageBackend):
         return c_id
 
     @classmethod
-    def ls_containers(cls):
-        return [str(x['_id']) for x in cls.db.containers.find()]
+    def ls_containers(cls, offset=0, limit=None):
+        if limit:
+            return [str(x['_id']) for x in cls.db.containers.find().sort('_id', ASCENDING).skip(offset).limit(limit)]
+        else:
+            return [str(x['_id']) for x in cls.db.containers.find().sort('_id', ASCENDING).skip(offset)]
 
     @classmethod
     def add_member(cls, c_id, m_id):
@@ -175,14 +186,24 @@ class MongoStorageBackend(IStorageBackend):
         return m_id
 
     @classmethod
-    def ls_members(cls, c_id):
-        try:
-            c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
-            if c is None:
-                raise KeyError
-        except InvalidId:
+    def ls_members(cls, c_id, offset=0, limit=None):
+        if limit:
+            end_index = offset + limit
+        else:
+            end_index = None
+        if not cls.container_exists(c_id):
             raise KeyError
-        return c['members']
+        c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
+        return c['members'][offset:end_index]
+
+    @classmethod
+    def container_exists(cls, c_id):
+        return bool(cls.db.containers.find_one({'_id': ObjectId(c_id)}))
+
+    @classmethod
+    def member_exists(cls, c_id, m_id):
+        c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
+        return m_id in c['members']
 
 
 # Assigning the backend to use needs to be diferred until after the configs
@@ -354,13 +375,13 @@ class Member(Resource):
     def get(self, container_id, member_id):
         log.info("Received GET @ Member endpoint")
         try:
-            if member_id in get_backend().ls_members(container_id):
+            if get_backend().member_exists(container_id, member_id):
                 return {
                     "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
                     "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
                 }
             else:
-                raise KeyError
+                raise KeyError()
         except KeyError:
             log.critical("Container with id {} ".format(container_id) +
                         "or member with id {} ".format(member_id) +

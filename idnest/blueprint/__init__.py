@@ -229,7 +229,7 @@ pagination_args_parser.add_argument(
     'offset', type=int, default=0
 )
 pagination_args_parser.add_argument(
-    'limit', type=int, default=10
+    'limit', type=int, default=1000
 )
 
 def check_limit(limit):

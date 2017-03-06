@@ -4,7 +4,7 @@ import logging
 
 from flask import Blueprint, abort, Response
 from flask_restful import Resource, Api, reqparse
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 
@@ -13,7 +13,7 @@ BLUEPRINT = Blueprint('idnest', __name__)
 
 
 BLUEPRINT.config = {
-    'STORAGE_BACKEND': "RAM",  # Default to just using dicts/sets
+    'STORAGE_BACKEND': "RAM",  # Default to just using dicts/lists
     'MONGO_HOST': 'localhost',        # If the app says to use mongo
     'MONGO_PORT': 27017,              # but specifies no other relevant info
     'MONGO_DB': "tmp_"+uuid4().hex,   # then use sensible defaults
@@ -67,7 +67,7 @@ class IStorageBackend(metaclass=ABCMeta):
 
     @classmethod
     @abstractmethod
-    def ls_containers(cls):
+    def ls_containers(cls, offset=0, limit=None):
         pass
 
     @classmethod
@@ -85,7 +85,7 @@ class IStorageBackend(metaclass=ABCMeta):
 
     @classmethod
     @abstractmethod
-    def ls_members(cls, c_id):
+    def ls_members(cls, c_id, offset=0, limit=None):
         pass
 
     @classmethod
@@ -109,7 +109,7 @@ class RAMStorageBackend(IStorageBackend):
     @classmethod
     def mint_container(cls):
         new_c_id = uuid4().hex
-        cls.data[new_c_id] = set()
+        cls.data[new_c_id] = []
         return new_c_id
 
     @classmethod
@@ -118,12 +118,16 @@ class RAMStorageBackend(IStorageBackend):
         return c_id
 
     @classmethod
-    def ls_containers(cls):
-        return list(cls.data.keys())
+    def ls_containers(cls, offset=0, limit=None):
+        if limit:
+            end_index = offset+limit
+        else:
+            end_index = None
+        return list(cls.data.keys())[offset:end_index]
 
     @classmethod
     def add_member(cls, c_id, m_id):
-        cls.data[c_id].add(m_id)
+        cls.data[c_id].append(m_id)
         return m_id
 
     @classmethod
@@ -132,8 +136,12 @@ class RAMStorageBackend(IStorageBackend):
         return m_id
 
     @classmethod
-    def ls_members(cls, c_id):
-        return set(cls.data[c_id])
+    def ls_members(cls, c_id, offset=0, limit=None):
+        if limit:
+            end_index = offset+limit
+        else:
+            end_index = None
+        return cls.data[c_id][offset:end_index]
 
 
 class MongoStorageBackend(IStorageBackend):
@@ -157,8 +165,11 @@ class MongoStorageBackend(IStorageBackend):
         return c_id
 
     @classmethod
-    def ls_containers(cls):
-        return [str(x['_id']) for x in cls.db.containers.find()]
+    def ls_containers(cls, offset=0, limit=None):
+        if limit:
+            return [str(x['_id']) for x in cls.db.containers.find().sort('_id', ASCENDING).skip(offset).limit(limit)]
+        else:
+            return [str(x['_id']) for x in cls.db.containers.find().sort('_id', ASCENDING).skip(offset)]
 
     @classmethod
     def add_member(cls, c_id, m_id):
@@ -175,14 +186,24 @@ class MongoStorageBackend(IStorageBackend):
         return m_id
 
     @classmethod
-    def ls_members(cls, c_id):
-        try:
-            c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
-            if c is None:
-                raise KeyError
-        except InvalidId:
+    def ls_members(cls, c_id, offset=0, limit=None):
+        if limit:
+            end_index = offset + limit
+        else:
+            end_index = None
+        if not cls.container_exists(c_id):
             raise KeyError
-        return set(c['members'])
+        c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
+        return c['members'][offset:end_index]
+
+    @classmethod
+    def container_exists(cls, c_id):
+        return bool(cls.db.containers.find_one({'_id': ObjectId(c_id)}))
+
+    @classmethod
+    def member_exists(cls, c_id, m_id):
+        c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
+        return m_id in c['members']
 
 
 # Assigning the backend to use needs to be diferred until after the configs
@@ -203,6 +224,21 @@ def output_html(data, code, headers=None):
     resp.status_code = code
     return resp
 
+pagination_args_parser = reqparse.RequestParser()
+pagination_args_parser.add_argument(
+    'offset', type=int, default=0
+)
+pagination_args_parser.add_argument(
+    'limit', type=int, default=1000
+)
+
+def check_limit(limit):
+    if limit > BLUEPRINT.config.get("MAX_LIMIT", 1000):
+        log.warn(
+            "Received request above MAX_LIMIT (or 1000 if undefined), capping.")
+        limit = BLUEPRINT.config.get("MAX_LIMIT", 1000)
+    return limit
+
 
 class Root(Resource):
     def post(self):
@@ -213,6 +249,7 @@ class Root(Resource):
                             help="How many containers to mint.",
                             default=1)
         args = parser.parse_args()
+        args['num'] = check_limit(args['num'])
         log.debug("Arguments parsed")
         return {
             "Minted": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
@@ -222,9 +259,19 @@ class Root(Resource):
 
     def get(self):
         log.info("Received GET @ root endpoint")
+        log.debug("Parsing args")
+        parser = pagination_args_parser.copy()
+        args = parser.parse_args()
+        args['limit'] = check_limit(args['limit'])
+        all_ids = get_backend().ls_containers()
+        total_containers = len(all_ids)
+        paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
-                           x in get_backend().ls_containers()],
+                           x in paginated_ids],
+            "offset": args['offset'],
+            "limit": args['limit'],
+            "total": total_containers,
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
 
@@ -292,10 +339,19 @@ class Container(Resource):
 
     def get(self, container_id):
         log.info("Received GET @ Container endpoint")
+        parser = pagination_args_parser.copy()
+        args = parser.parse_args()
+        args['limit'] = check_limit(args['limit'])
         try:
+            all_ids = get_backend().ls_members(container_id)
+            total_members = len(all_ids)
+            paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
-                            x in get_backend().ls_members(container_id)],
+                            x in paginated_ids],
+                "offset": args['offset'],
+                "limit": args['limit'],
+                "total": total_members,
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
@@ -319,13 +375,13 @@ class Member(Resource):
     def get(self, container_id, member_id):
         log.info("Received GET @ Member endpoint")
         try:
-            if member_id in get_backend().ls_members(container_id):
+            if get_backend().member_exists(container_id, member_id):
                 return {
                     "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
                     "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
                 }
             else:
-                raise KeyError
+                raise KeyError()
         except KeyError:
             log.critical("Container with id {} ".format(container_id) +
                         "or member with id {} ".format(member_id) +

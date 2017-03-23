@@ -5,6 +5,7 @@ import logging
 from flask import Blueprint, abort, Response
 from flask_restful import Resource, Api, reqparse
 from pymongo import MongoClient, ASCENDING
+import redis
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 
@@ -206,6 +207,38 @@ class MongoStorageBackend(IStorageBackend):
         return m_id in c['members']
 
 
+class RedisStorageBackend(IStorageBackend):
+    @classmethod
+    def mint_container(cls):
+        c_id = uuid4().hex
+        cls.r.lpush(c_id, 0)
+        return c_id
+
+    @classmethod
+    def rm_container(cls, c_id):
+        cls.r.delete(c_id)
+        return c_id
+
+    @classmethod
+    def ls_containers(cls):
+        return [x.encode("utf-8") for x in cls.r.scan_iter()]
+
+    @classmethod
+    def container_exists(cls, c_id):
+        return c_id in cls.r
+
+    @classmethod
+    def add_member(cls, c_id, m_id):
+        cls.r.lpush(c_id, m_id)
+
+    @classmethod
+    def ls_members(cls, c_id):
+        return [x.encode("utf-8") for x in cls.r.range(c_id, 0, -1)]
+
+    @classmethod
+    def rm_member(cls, c_id, m_id):
+        cls.r.lrem(c_id, 1, m_id)
+        return m_id
 # Assigning the backend to use needs to be diferred until after the configs
 # been potentially altered by the app context in order to set configuration
 # values.
@@ -214,6 +247,8 @@ class MongoStorageBackend(IStorageBackend):
 def get_backend():
     if BLUEPRINT.config.get('STORAGE_BACKEND') == "MONGODB":
         return MongoStorageBackend
+    elif BLUEPRINT.config.get('STORAGE_BACKEND') == "REDIS":
+        return RedisStorageBackend
     else:
         return RAMStorageBackend
 
@@ -408,10 +443,19 @@ class Member(Resource):
 def handle_configs(setup_state):
     app = setup_state.app
     BLUEPRINT.config.update(app.config)
+    print("boooo")
+    print(BLUEPRINT.config.get("STORAGE_BACKEND"))
     if BLUEPRINT.config.get("STORAGE_BACKEND") == "MONGODB":
         client = MongoClient(BLUEPRINT.config.get("MONGO_HOST"),
                              BLUEPRINT.config.get("MONGO_PORT"))
         MongoStorageBackend.db = client[BLUEPRINT.config.get("MONGO_DB")]
+    elif BLUEPRINT.config.get("STORAGE_BACKEND") == "REDIS":
+        print("woooo")
+        RedisStorageBackend.r = redis.StrictRedis(
+            host=BLUEPRINT.config.get("REDIS_HOST"),
+            port=BLUEPRINT.config.get("REDIS_PORT"),
+            db=BLUEPRINT.config.get("REDIS_DB")
+        )
     if BLUEPRINT.config.get("VERBOSITY"):
         logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])
     else:

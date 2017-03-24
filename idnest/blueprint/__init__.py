@@ -135,7 +135,7 @@ class MongoStorageBackend(IStorageBackend):
     def __init__(self, bp):
         client = MongoClient(bp.config.get("MONGO_HOST"),
                              bp.config.get("MONGO_PORT", 27017))
-        self.db = client[bp.config["MONGO_DBNAME"]]
+        self.db = client[bp.config["MONGO_DB"]]
 
     def mint_container(self):
         new_c = self.db.containers.insert_one({'members': []})

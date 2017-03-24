@@ -221,7 +221,7 @@ class RedisStorageBackend(IStorageBackend):
 
     @classmethod
     def ls_containers(cls):
-        return [x.encode("utf-8") for x in cls.r.scan_iter()]
+        return [x.decode("utf-8") for x in cls.r.scan_iter()]
 
     @classmethod
     def container_exists(cls, c_id):
@@ -229,28 +229,30 @@ class RedisStorageBackend(IStorageBackend):
 
     @classmethod
     def add_member(cls, c_id, m_id):
-        cls.r.lpush(c_id, m_id)
+        cls.r.rpush(c_id, m_id)
+        return m_id
 
     @classmethod
     def ls_members(cls, c_id):
-        return [x.encode("utf-8") for x in cls.r.range(c_id, 0, -1)]
+        # Skip the 0 we're using to keep Redis form deleting our key
+        return [x.decode("utf-8") for x in cls.r.lrange(c_id, 1, -1)]
 
     @classmethod
     def rm_member(cls, c_id, m_id):
         cls.r.lrem(c_id, 1, m_id)
         return m_id
+
 # Assigning the backend to use needs to be diferred until after the configs
 # been potentially altered by the app context in order to set configuration
 # values.
 # Thus this function
 
 def get_backend():
-    if BLUEPRINT.config.get('STORAGE_BACKEND') == "MONGODB":
-        return MongoStorageBackend
-    elif BLUEPRINT.config.get('STORAGE_BACKEND') == "REDIS":
-        return RedisStorageBackend
-    else:
-        return RAMStorageBackend
+    storageBackends = {
+        "MONGODB": MongoStorageBackend,
+        "REDIS": RedisStorageBackend
+    }
+    return storageBackends.get(BLUEPRINT.config['STORAGE_BACKEND'], RAMStorageBackend)
 
 
 def output_html(data, code, headers=None):

@@ -13,12 +13,7 @@ from bson.errors import InvalidId
 BLUEPRINT = Blueprint('idnest', __name__)
 
 
-BLUEPRINT.config = {
-    'STORAGE_BACKEND': "RAM",  # Default to just using dicts/lists
-    'MONGO_HOST': 'localhost',        # If the app says to use mongo
-    'MONGO_PORT': 27017,              # but specifies no other relevant info
-    'MONGO_DB': "tmp_"+uuid4().hex,   # then use sensible defaults
-}
+BLUEPRINT.config = {}
 
 
 API = Api(BLUEPRINT)
@@ -445,14 +440,11 @@ class Member(Resource):
 def handle_configs(setup_state):
     app = setup_state.app
     BLUEPRINT.config.update(app.config)
-    print("boooo")
-    print(BLUEPRINT.config.get("STORAGE_BACKEND"))
     if BLUEPRINT.config.get("STORAGE_BACKEND") == "MONGODB":
         client = MongoClient(BLUEPRINT.config.get("MONGO_HOST"),
                              BLUEPRINT.config.get("MONGO_PORT"))
         MongoStorageBackend.db = client[BLUEPRINT.config.get("MONGO_DB")]
     elif BLUEPRINT.config.get("STORAGE_BACKEND") == "REDIS":
-        print("woooo")
         RedisStorageBackend.r = redis.StrictRedis(
             host=BLUEPRINT.config.get("REDIS_HOST"),
             port=BLUEPRINT.config.get("REDIS_PORT"),

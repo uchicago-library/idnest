@@ -207,6 +207,8 @@ class RedisStorageBackend(IStorageBackend):
         return c_id in self.r
 
     def add_member(self, c_id, m_id):
+        if not self.container_exists(c_id):
+            raise ValueError("Can't put a member in a container that doesn't exist")
         self.r.rpush(c_id, m_id)
         return m_id
 

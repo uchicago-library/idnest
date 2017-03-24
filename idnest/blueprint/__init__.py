@@ -7,7 +7,6 @@ from flask_restful import Resource, Api, reqparse
 from pymongo import MongoClient, ASCENDING
 import redis
 from bson.objectid import ObjectId
-from bson.errors import InvalidId
 
 
 BLUEPRINT = Blueprint('idnest', __name__)
@@ -43,101 +42,86 @@ class IStorageBackend(metaclass=ABCMeta):
     * rm_members
     * member_exists
     """
-    @classmethod
     @abstractmethod
-    def mint_container(cls):
+    def mint_container(self):
         pass
 
-    @classmethod
-    def mint_containers(cls, num):
-        return [cls.mint_container() for _ in range(num)]
+    def mint_containers(self, num):
+        return [self.mint_container() for _ in range(num)]
 
-    @classmethod
     @abstractmethod
-    def rm_container(cls, c_id):
+    def rm_container(self, c_id):
         pass
 
-    @classmethod
-    def rm_containers(cls, c_ids):
-        return [cls.rm_container(c_id) for c_id in c_ids]
+    def rm_containers(self, c_ids):
+        return [self.rm_container(c_id) for c_id in c_ids]
 
-    @classmethod
     @abstractmethod
-    def ls_containers(cls, offset=0, limit=None):
+    def ls_containers(self, offset=0, limit=None):
         pass
 
-    @classmethod
-    def container_exists(cls, qc_id):
-        return qc_id in cls.ls_containers()
+    def container_exists(self, qc_id):
+        return qc_id in self.ls_containers()
 
-    @classmethod
     @abstractmethod
-    def add_member(cls, c_id, m_id):
+    def add_member(self, c_id, m_id):
         pass
 
-    @classmethod
-    def add_members(cls, c_id, m_ids):
-        return [cls.add_member(c_id, m_id) for m_id in m_ids]
+    def add_members(self, c_id, m_ids):
+        return [self.add_member(c_id, m_id) for m_id in m_ids]
 
-    @classmethod
     @abstractmethod
-    def ls_members(cls, c_id, offset=0, limit=None):
+    def ls_members(self, c_id, offset=0, limit=None):
         pass
 
-    @classmethod
     @abstractmethod
-    def rm_member(cls, c_id, m_id):
+    def rm_member(self, c_id, m_id):
         pass
 
-    @classmethod
-    def rm_members(cls, c_id, m_ids):
-        return [cls.rm_member(c_id, m_id) for m_id in m_ids]
+    def rm_members(self, c_id, m_ids):
+        return [self.rm_member(c_id, m_id) for m_id in m_ids]
 
-    @classmethod
-    def member_exists(cls, c_id, qm_id):
-        return qm_id in cls.ls_members(c_id)
+    def member_exists(self, c_id, qm_id):
+        return qm_id in self.ls_members(c_id)
 
 
 class RAMStorageBackend(IStorageBackend):
 
     data = {}
 
-    @classmethod
-    def mint_container(cls):
+    def __init__(self, bp):
+        pass
+
+    def mint_container(self):
         new_c_id = uuid4().hex
-        cls.data[new_c_id] = []
+        self.data[new_c_id] = []
         return new_c_id
 
-    @classmethod
-    def rm_container(cls, c_id):
-        del cls.data[c_id]
+    def rm_container(self, c_id):
+        del self.data[c_id]
         return c_id
 
-    @classmethod
-    def ls_containers(cls, offset=0, limit=None):
+    def ls_containers(self, offset=0, limit=None):
         if limit:
             end_index = offset+limit
         else:
             end_index = None
-        return list(cls.data.keys())[offset:end_index]
+        return list(self.data.keys())[offset:end_index]
 
-    @classmethod
-    def add_member(cls, c_id, m_id):
-        cls.data[c_id].append(m_id)
+    def add_member(self, c_id, m_id):
+        self.data[c_id].append(m_id)
         return m_id
 
-    @classmethod
-    def rm_member(cls, c_id, m_id):
-        cls.data[c_id].remove(m_id)
+    def rm_member(self, c_id, m_id):
+        self.data[c_id].remove(m_id)
         return m_id
 
-    @classmethod
-    def ls_members(cls, c_id, offset=0, limit=None):
+    def ls_members(self, c_id, offset=0, limit=None):
         if limit:
             end_index = offset+limit
         else:
             end_index = None
-        return cls.data[c_id][offset:end_index]
+        return self.data[c_id][offset:end_index]
 
 
 class MongoStorageBackend(IStorageBackend):
@@ -148,106 +132,91 @@ class MongoStorageBackend(IStorageBackend):
     # we do this with some flask black magic callback nonsense on registering
     # the blueprint to an application at the bottom of this file.
 
-    @classmethod
-    def mint_container(cls):
-        new_c = cls.db.containers.insert_one({'members': []})
+    def __init__(self, bp):
+        client = MongoClient(bp.config.get("MONGO_HOST"),
+                             bp.config.get("MONGO_PORT", 27017))
+        self.db = client[bp.config["MONGO_DBNAME"]]
+
+    def mint_container(self):
+        new_c = self.db.containers.insert_one({'members': []})
         return str(new_c.inserted_id)
 
-    @classmethod
-    def rm_container(cls, c_id):
-        r = cls.db.containers.delete_one({'_id': ObjectId(c_id)})
+    def rm_container(self, c_id):
+        r = self.db.containers.delete_one({'_id': ObjectId(c_id)})
         if r.deleted_count < 1:
             raise KeyError
         return c_id
 
-    @classmethod
-    def ls_containers(cls, offset=0, limit=None):
+    def ls_containers(self, offset=0, limit=None):
         if limit:
-            return [str(x['_id']) for x in cls.db.containers.find().sort('_id', ASCENDING).skip(offset).limit(limit)]
+            return [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(offset).limit(limit)]
         else:
-            return [str(x['_id']) for x in cls.db.containers.find().sort('_id', ASCENDING).skip(offset)]
+            return [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(offset)]
 
-    @classmethod
-    def add_member(cls, c_id, m_id):
-        r = cls.db.containers.update_one({'_id': ObjectId(c_id)}, {'$push': {'members': m_id}})
+    def add_member(self, c_id, m_id):
+        r = self.db.containers.update_one({'_id': ObjectId(c_id)}, {'$push': {'members': m_id}})
         if r.modified_count < 1:
             raise KeyError
         return m_id
 
-    @classmethod
-    def rm_member(cls, c_id, m_id):
-        r = cls.db.containers.update_one({'_id': ObjectId(c_id)}, {'$pull': {'members': m_id}})
+    def rm_member(self, c_id, m_id):
+        r = self.db.containers.update_one({'_id': ObjectId(c_id)}, {'$pull': {'members': m_id}})
         if r.modified_count < 1:
             raise KeyError
         return m_id
 
-    @classmethod
-    def ls_members(cls, c_id, offset=0, limit=None):
+    def ls_members(self, c_id, offset=0, limit=None):
         if limit:
             end_index = offset + limit
         else:
             end_index = None
-        if not cls.container_exists(c_id):
+        if not self.container_exists(c_id):
             raise KeyError
-        c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
+        c = self.db.containers.find_one({'_id': ObjectId(c_id)})
         return c['members'][offset:end_index]
 
-    @classmethod
-    def container_exists(cls, c_id):
-        return bool(cls.db.containers.find_one({'_id': ObjectId(c_id)}))
+    def container_exists(self, c_id):
+        return bool(self.db.containers.find_one({'_id': ObjectId(c_id)}))
 
-    @classmethod
-    def member_exists(cls, c_id, m_id):
-        c = cls.db.containers.find_one({'_id': ObjectId(c_id)})
+    def member_exists(self, c_id, m_id):
+        c = self.db.containers.find_one({'_id': ObjectId(c_id)})
         return m_id in c['members']
 
 
 class RedisStorageBackend(IStorageBackend):
-    @classmethod
-    def mint_container(cls):
+    def __init__(self, bp):
+        self.r = redis.StrictRedis(
+            host=bp.config["REDIS_HOST"],
+            port=bp.config.get("REDIS_PORT", 6379),
+            db=bp.config["REDIS_DB"]
+        )
+
+    def mint_container(self):
         c_id = uuid4().hex
-        cls.r.lpush(c_id, 0)
+        self.r.lpush(c_id, 0)
         return c_id
 
-    @classmethod
-    def rm_container(cls, c_id):
-        cls.r.delete(c_id)
+    def rm_container(self, c_id):
+        self.r.delete(c_id)
         return c_id
 
-    @classmethod
-    def ls_containers(cls):
-        return [x.decode("utf-8") for x in cls.r.scan_iter()]
+    def ls_containers(self):
+        return [x.decode("utf-8") for x in self.r.scan_iter()]
 
-    @classmethod
-    def container_exists(cls, c_id):
-        return c_id in cls.r
+    def container_exists(self, c_id):
+        return c_id in self.r
 
-    @classmethod
-    def add_member(cls, c_id, m_id):
-        cls.r.rpush(c_id, m_id)
+    def add_member(self, c_id, m_id):
+        self.r.rpush(c_id, m_id)
         return m_id
 
-    @classmethod
-    def ls_members(cls, c_id):
+    def ls_members(self, c_id):
         # Skip the 0 we're using to keep Redis form deleting our key
-        return [x.decode("utf-8") for x in cls.r.lrange(c_id, 1, -1)]
+        return [x.decode("utf-8") for x in self.r.lrange(c_id, 1, -1)]
 
-    @classmethod
-    def rm_member(cls, c_id, m_id):
-        cls.r.lrem(c_id, 1, m_id)
+    def rm_member(self, c_id, m_id):
+        self.r.lrem(c_id, 1, m_id)
         return m_id
-
-# Assigning the backend to use needs to be diferred until after the configs
-# been potentially altered by the app context in order to set configuration
-# values.
-# Thus this function
-
-def get_backend():
-    storageBackends = {
-        "MONGODB": MongoStorageBackend,
-        "REDIS": RedisStorageBackend
-    }
-    return storageBackends.get(BLUEPRINT.config['STORAGE_BACKEND'], RAMStorageBackend)
 
 
 def output_html(data, code, headers=None):
@@ -285,7 +254,7 @@ class Root(Resource):
         log.debug("Arguments parsed")
         return {
             "Minted": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
-                       x in get_backend().mint_containers(args['num'])],
+                       x in BLUEPRINT.config['storage'].mint_containers(args['num'])],
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
 
@@ -295,7 +264,7 @@ class Root(Resource):
         parser = pagination_args_parser.copy()
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
-        all_ids = get_backend().ls_containers()
+        all_ids = BLUEPRINT.config['storage'].ls_containers()
         total_containers = len(all_ids)
         paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
         return {
@@ -362,7 +331,7 @@ class Container(Resource):
         try:
             return {
                 "Added": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
-                          x in get_backend().add_members(container_id, args['member'])],
+                          x in BLUEPRINT.config['storage'].add_members(container_id, args['member'])],
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
@@ -375,7 +344,7 @@ class Container(Resource):
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
         try:
-            all_ids = get_backend().ls_members(container_id)
+            all_ids = BLUEPRINT.config['storage'].ls_members(container_id)
             total_members = len(all_ids)
             paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
             return {
@@ -393,7 +362,7 @@ class Container(Resource):
     def delete(self, container_id):
         log.info("Received DELETE @ Container endpoint")
         try:
-            get_backend().rm_container(container_id)
+            BLUEPRINT.config['storage'].rm_container(container_id)
             return {
                 "Deleted": True,
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
@@ -407,7 +376,7 @@ class Member(Resource):
     def get(self, container_id, member_id):
         log.info("Received GET @ Member endpoint")
         try:
-            if get_backend().member_exists(container_id, member_id):
+            if BLUEPRINT.config['storage'].member_exists(container_id, member_id):
                 return {
                     "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
                     "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
@@ -423,7 +392,7 @@ class Member(Resource):
     def delete(self, container_id, member_id):
         log.info("Received DELETE @ Member endpoint")
         try:
-            get_backend().rm_member(container_id, member_id)
+            BLUEPRINT.config['storage'].rm_member(container_id, member_id)
             return {
                 "Deleted": True,
                 "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
@@ -440,16 +409,26 @@ class Member(Resource):
 def handle_configs(setup_state):
     app = setup_state.app
     BLUEPRINT.config.update(app.config)
-    if BLUEPRINT.config.get("STORAGE_BACKEND") == "MONGODB":
-        client = MongoClient(BLUEPRINT.config.get("MONGO_HOST"),
-                             BLUEPRINT.config.get("MONGO_PORT"))
-        MongoStorageBackend.db = client[BLUEPRINT.config.get("MONGO_DB")]
-    elif BLUEPRINT.config.get("STORAGE_BACKEND") == "REDIS":
-        RedisStorageBackend.r = redis.StrictRedis(
-            host=BLUEPRINT.config.get("REDIS_HOST"),
-            port=BLUEPRINT.config.get("REDIS_PORT"),
-            db=BLUEPRINT.config.get("REDIS_DB")
+
+    storage_choice = BLUEPRINT.config.get("STORAGE_BACKEND")
+
+    supported_backends = {
+        "mongodb": MongoStorageBackend,
+        "redis": RedisStorageBackend,
+        "ram": RAMStorageBackend,
+        "noerror": None
+    }
+
+    if storage_choice.lower() not in supported_backends:
+        raise RuntimeError(
+            "Supported storage backends include: " +
+            "{}".format(", ".join(supported_backends.keys()))
         )
+    elif storage_choice.lower() == 'noerror':
+        pass
+    else:
+        BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
+
     if BLUEPRINT.config.get("VERBOSITY"):
         logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])
     else:

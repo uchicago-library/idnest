@@ -346,6 +346,8 @@ class Container(Resource):
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
         try:
+            if not BLUEPRINT.config['storage'].container_exists(container_id):
+                raise KeyError
             all_ids = BLUEPRINT.config['storage'].ls_members(container_id)
             total_members = len(all_ids)
             paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]

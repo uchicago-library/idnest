@@ -3,6 +3,7 @@ COPY . /code
 WORKDIR /code
 RUN python setup.py install
 RUN pip install gunicorn
+ENV IDNEST_CONFIG="/code/config.py"
 ARG PORT="8910"
 ENV PORT=$PORT
 ARG WORKERS="4"

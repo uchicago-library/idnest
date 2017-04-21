@@ -423,15 +423,16 @@ def handle_configs(setup_state):
         "noerror": None
     }
 
-    if storage_choice.lower() not in supported_backends:
+    if storage_choice is not None and storage_choice.lower() not in supported_backends:
         raise RuntimeError(
             "Supported storage backends include: " +
             "{}".format(", ".join(supported_backends.keys()))
         )
-    elif storage_choice.lower() == 'noerror':
+    elif storage_choice is not None and storage_choice.lower() == 'noerror':
         pass
     else:
-        BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
+        if storage_choice is not None:
+            BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
 
     if BLUEPRINT.config.get("VERBOSITY"):
         logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])

@@ -115,6 +115,19 @@ class IdnestTestCase(unittest.TestCase):
         self.assertEqual(m_id, self.get_container(c_id)['Members'][0]['identifier'])
         self.get_member(c_id, m_id)
 
+    def test_mongo_get_empty_root(self):
+        idnest.blueprint.BLUEPRINT.config['MONGO_HOST'] = "localhost"
+        idnest.blueprint.BLUEPRINT.config['MONGO_DB']= "test"
+        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.MongoStorageBackend(idnest.blueprint.BLUEPRINT)
+        rj = self.get_root()
+        self.assertEqual(len(rj['Containers']), 0)
+
+    def test_mongo_404_on_get_nonexistant_container(self):
+        idnest.blueprint.BLUEPRINT.config['MONGO_HOST'] = "localhost"
+        idnest.blueprint.BLUEPRINT.config['MONGO_DB']= "test"
+        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.MongoStorageBackend(idnest.blueprint.BLUEPRINT)
+        self.nonexistant_container_404s()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -88,11 +88,8 @@ class IStorageBackend(metaclass=ABCMeta):
 
 
 class RAMStorageBackend(IStorageBackend):
-
-    data = {}
-
     def __init__(self, bp):
-        pass
+        self.data = {}
 
     def mint_container(self):
         new_c_id = uuid4().hex

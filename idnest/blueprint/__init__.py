@@ -450,7 +450,7 @@ def before_request():
     # Check to be sure all our pre-request configuration has been done.
     if not isinstance(BLUEPRINT.config.get('storage'), IStorageBackend):
         raise RuntimeError("No storage backend is configured!")
-    abort(500)
+        abort(500)
 
 
 API.add_resource(Root, "/")

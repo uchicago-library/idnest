@@ -2,11 +2,13 @@ import idnest
 import unittest
 import json
 from uuid import uuid4
+from pymongo import MongoClient
 
 
-class IdnestTestCase(unittest.TestCase):
+class RAMIdnestTestCase(unittest.TestCase):
     def setUp(self):
         self.app = idnest.app.test_client()
+        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
 
     def tearDown(self):
         pass
@@ -72,25 +74,20 @@ class IdnestTestCase(unittest.TestCase):
     def add_multiple_members(self, c_id):
         pass
 
-    def test_ram_get_empty_root(self):
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
+    def test_get_empty_root(self):
         rj = self.get_root()
         self.assertEqual(len(rj['Containers']), 0)
 
-    def test_ram_404_on_get_nonexistant_container(self):
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
+    def test_404_on_get_nonexistant_container(self):
         self.nonexistant_container_404s()
 
-    def test_ram_404_on_get_nonexistant_member(self):
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
+    def test_404_on_get_nonexistant_member(self):
         self.nonexistant_member_404s()
 
-    def test_ram_404_on_get_nonexistant_member_in_container_that_exists(self):
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
+    def test_404_on_get_nonexistant_member_in_container_that_exists(self):
         self.nonexistant_member_404s(c_id=self.add_container())
 
-    def test_ram_mint_a_single_container(self):
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
+    def test_mint_a_single_container(self):
         c_id = self.add_container()
         rj = self.get_root()
         self.assertIn("Containers", rj)
@@ -99,8 +96,7 @@ class IdnestTestCase(unittest.TestCase):
         self.assertEqual(rj['Containers'][0]['identifier'], c_id)
         self.get_container(c_id)
 
-    def test_ram_mint_multiple_containers(self):
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
+    def test_mint_multiple_containers(self):
         ids = self.add_multiple_containers(20)
         rj = self.get_root()
         self.assertIn("Containers", rj)
@@ -108,25 +104,45 @@ class IdnestTestCase(unittest.TestCase):
         for x in rj['Containers']:
             self.assertTrue(x['identifier'] in ids)
 
-    def test_ram_add_member_to_container(self):
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
+    def test_add_member_to_container(self):
         c_id = self.add_container()
         m_id = self.add_member(c_id)
         self.assertEqual(m_id, self.get_container(c_id)['Members'][0]['identifier'])
         self.get_member(c_id, m_id)
 
-    def test_mongo_get_empty_root(self):
-        idnest.blueprint.BLUEPRINT.config['MONGO_HOST'] = "localhost"
-        idnest.blueprint.BLUEPRINT.config['MONGO_DB']= "test"
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.MongoStorageBackend(idnest.blueprint.BLUEPRINT)
-        rj = self.get_root()
-        self.assertEqual(len(rj['Containers']), 0)
+    def test_get_html_mint_page(self):
+        rv = self.app.get("/mint")
+        self.assertEqual(rv.status_code, 200)
 
-    def test_mongo_404_on_get_nonexistant_container(self):
+    def test_get_html_member_add(self):
+        rv = self.app.get("/{}/add".format(uuid4().hex))
+        self.assertEqual(rv.status_code, 200)
+
+
+class MongoIdnestTestCase(RAMIdnestTestCase):
+    def setUp(self):
+        self.app = idnest.app.test_client()
         idnest.blueprint.BLUEPRINT.config['MONGO_HOST'] = "localhost"
         idnest.blueprint.BLUEPRINT.config['MONGO_DB']= "test"
         idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.MongoStorageBackend(idnest.blueprint.BLUEPRINT)
-        self.nonexistant_container_404s()
+
+    def tearDown(self):
+        c = MongoClient(idnest.blueprint.BLUEPRINT.config['MONGO_HOST'],
+                        idnest.blueprint.BLUEPRINT.config.get('MONGO_PORT', 27017))
+        c.drop_database(idnest.blueprint.BLUEPRINT.config['MONGO_DB'])
+        idnest.blueprint.BLUEPRINT.config['storage']
+
+
+class RedisIdnestTestCase(RAMIdnestTestCase):
+    def setUp(self):
+        self.app = idnest.app.test_client()
+        idnest.blueprint.BLUEPRINT.config['REDIS_HOST'] = "localhost"
+        idnest.blueprint.BLUEPRINT.config['REDIS_DB'] = 0
+        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RedisStorageBackend(idnest.blueprint.BLUEPRINT)
+
+    def tearDown(self):
+        idnest.blueprint.BLUEPRINT.config['storage'].r.flushdb()
+
 
 
 if __name__ == '__main__':

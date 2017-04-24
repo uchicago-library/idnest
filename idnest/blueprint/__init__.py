@@ -7,6 +7,7 @@ from flask_restful import Resource, Api, reqparse
 from pymongo import MongoClient, ASCENDING
 import redis
 from bson.objectid import ObjectId
+from bson.errors import InvalidId
 
 
 BLUEPRINT = Blueprint('idnest', __name__)
@@ -168,10 +169,16 @@ class MongoStorageBackend(IStorageBackend):
         return c['members'][offset:end_index]
 
     def container_exists(self, c_id):
-        return bool(self.db.containers.find_one({'_id': ObjectId(c_id)}))
+        try:
+            return bool(self.db.containers.find_one({'_id': ObjectId(c_id)}))
+        except InvalidId:
+            raise KeyError
 
     def member_exists(self, c_id, m_id):
-        c = self.db.containers.find_one({'_id': ObjectId(c_id)})
+        try:
+            c = self.db.containers.find_one({'_id': ObjectId(c_id)})
+        except InvalidId:
+            raise KeyError
         return m_id in c['members']
 
 

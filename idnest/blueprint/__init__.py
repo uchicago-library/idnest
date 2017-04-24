@@ -12,7 +12,9 @@ from bson.objectid import ObjectId
 BLUEPRINT = Blueprint('idnest', __name__)
 
 
-BLUEPRINT.config = {}
+BLUEPRINT.config = {
+    'STORAGE_BACKEND': 'noerror'
+}
 
 
 API = Api(BLUEPRINT)
@@ -125,13 +127,6 @@ class RAMStorageBackend(IStorageBackend):
 
 
 class MongoStorageBackend(IStorageBackend):
-
-    # NOTE: This class assumes something else is assigning a .db attribute to it
-    # so that it can communicate with the @classmethods. If you don't assign a
-    # .db attribute to the class at some point, nothing will work. In this case,
-    # we do this with some flask black magic callback nonsense on registering
-    # the blueprint to an application at the bottom of this file.
-
     def __init__(self, bp):
         client = MongoClient(bp.config.get("MONGO_HOST"),
                              bp.config.get("MONGO_PORT", 27017))
@@ -408,13 +403,23 @@ class Member(Resource):
                         "not found")
             abort(404)
 
-# Let the application context clober any config options here
+# Let the application context clobber any config options here
 @BLUEPRINT.record
 def handle_configs(setup_state):
     app = setup_state.app
     BLUEPRINT.config.update(app.config)
 
     storage_choice = BLUEPRINT.config.get("STORAGE_BACKEND")
+    if storage_choice is None:
+        raise RuntimeError(
+            "Missing required configuration value 'STORAGE_BACKEND'"
+        )
+    if not isinstance(storage_choice, str):
+        raise TypeError(
+            "STORAGE_BACKEND value is not a str, is instead a {}".format(
+                str(type(storage_choice))
+            )
+        )
 
     supported_backends = {
         "mongodb": MongoStorageBackend,
@@ -423,21 +428,29 @@ def handle_configs(setup_state):
         "noerror": None
     }
 
-    if storage_choice is not None and storage_choice.lower() not in supported_backends:
+    if storage_choice.lower() not in supported_backends:
         raise RuntimeError(
+            "Unsupported STORAGE_BACKEND: {}\n".format(storage_choice) +
             "Supported storage backends include: " +
             "{}".format(", ".join(supported_backends.keys()))
         )
-    elif storage_choice is not None and storage_choice.lower() == 'noerror':
+    elif storage_choice.lower() == 'noerror':
         pass
     else:
-        if storage_choice is not None:
-            BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
+        BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
 
     if BLUEPRINT.config.get("VERBOSITY"):
         logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])
     else:
         logging.basicConfig(level="WARN")
+
+
+@BLUEPRINT.before_request
+def before_request():
+    # Check to be sure all our pre-request configuration has been done.
+    if not isinstance(BLUEPRINT.config.get('storage'), IStorageBackend):
+        raise RuntimeError("No storage backend is configured!")
+    abort(500)
 
 
 API.add_resource(Root, "/")

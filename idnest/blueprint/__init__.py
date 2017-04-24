@@ -128,7 +128,7 @@ class RAMStorageBackend(IStorageBackend):
 
 class MongoStorageBackend(IStorageBackend):
     def __init__(self, bp):
-        client = MongoClient(bp.config.get("MONGO_HOST"),
+        client = MongoClient(bp.config["MONGO_HOST"],
                              bp.config.get("MONGO_PORT", 27017))
         self.db = client[bp.config["MONGO_DB"]]
 
@@ -439,10 +439,9 @@ def handle_configs(setup_state):
     else:
         BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
 
-    if BLUEPRINT.config.get("VERBOSITY"):
-        logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])
-    else:
-        logging.basicConfig(level="WARN")
+    if BLUEPRINT.config.get("VERBOSITY") is None:
+        BLUEPRINT.config["VERBOSITY"] = "WARN"
+    logging.basicConfig(level=BLUEPRINT.config["VERBOSITY"])
 
 
 @BLUEPRINT.before_request

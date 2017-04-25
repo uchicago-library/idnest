@@ -122,6 +122,11 @@ class RAMIdnestTestCase(unittest.TestCase):
         self.assertEqual(m_id, self.get_container(c_id)['Members'][0]['identifier'])
         self.get_member(c_id, m_id)
 
+    def test_add_member_to_container_that_doesnt_exist_404s(self):
+        c_id = uuid4().hex
+        pcrv = self.app.post("/{}/".format(c_id), data={"member": uuid4().hex})
+        self.assertEqual(pcrv.status_code, 404)
+
     def test_get_html_mint_page(self):
         rv = self.app.get("/mint")
         self.assertEqual(rv.status_code, 200)
@@ -138,6 +143,15 @@ class RAMIdnestTestCase(unittest.TestCase):
         c_id = self.add_container()
         m_id = self.add_member(c_id)
         self.remove_member(c_id, m_id)
+
+    def test_deleting_container_that_doesnt_exist_200s(self):
+        rv = self.app.delete("/{}/".format(uuid4().hex))
+        self.assertEqual(rv.status_code, 200)
+
+    def test_deleting_a_nonexistant_member_from_an_existing_container(self):
+        c_id = self.add_container()
+        rv = self.app.delete("/{}/{}".format(c_id, uuid4().hex))
+        self.assertEqual(rv.status_code, 200)
 
     def test_removing_popualted_container(self):
         c_id = self.add_container()
@@ -169,6 +183,12 @@ class RedisIdnestTestCase(RAMIdnestTestCase):
     def tearDown(self):
         idnest.blueprint.BLUEPRINT.config['storage'].r.flushdb()
 
+
+class ImproperSetupTestCase(unittest.TestCase):
+    def test_no_storage_backend(self):
+        self.app = idnest.app.test_client()
+        rv = self.app.get("/")
+        self.assertEqual(rv.status_code, 500)
 
 
 if __name__ == '__main__':

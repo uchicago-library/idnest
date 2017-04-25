@@ -98,7 +98,10 @@ class RAMStorageBackend(IStorageBackend):
         return new_c_id
 
     def rm_container(self, c_id):
-        del self.data[c_id]
+        try:
+            del self.data[c_id]
+        except KeyError:
+            pass
         return c_id
 
     def ls_containers(self, offset=0, limit=None):
@@ -113,7 +116,10 @@ class RAMStorageBackend(IStorageBackend):
         return m_id
 
     def rm_member(self, c_id, m_id):
-        self.data[c_id].remove(m_id)
+        try:
+            self.data[c_id].remove(m_id)
+        except ValueError:
+            pass
         return m_id
 
     def ls_members(self, c_id, offset=0, limit=None):
@@ -131,13 +137,12 @@ class MongoStorageBackend(IStorageBackend):
         self.db = client[bp.config["MONGO_DB"]]
 
     def mint_container(self):
-        new_c = self.db.containers.insert_one({'members': []})
-        return str(new_c.inserted_id)
+        id = uuid4().hex
+        new_c = self.db.containers.insert_one({'members': [], '_id': id})
+        return id
 
     def rm_container(self, c_id):
-        r = self.db.containers.delete_one({'_id': ObjectId(c_id)})
-        if r.deleted_count < 1:
-            raise KeyError
+        r = self.db.containers.delete_one({'_id': c_id})
         return c_id
 
     def ls_containers(self, offset=0, limit=None):
@@ -147,15 +152,13 @@ class MongoStorageBackend(IStorageBackend):
             return [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(offset)]
 
     def add_member(self, c_id, m_id):
-        r = self.db.containers.update_one({'_id': ObjectId(c_id)}, {'$push': {'members': m_id}})
+        r = self.db.containers.update_one({'_id': c_id}, {'$push': {'members': m_id}})
         if r.modified_count < 1:
             raise KeyError
         return m_id
 
     def rm_member(self, c_id, m_id):
-        r = self.db.containers.update_one({'_id': ObjectId(c_id)}, {'$pull': {'members': m_id}})
-        if r.modified_count < 1:
-            raise KeyError
+        r = self.db.containers.update_one({'_id': c_id}, {'$pull': {'members': m_id}})
         return m_id
 
     def ls_members(self, c_id, offset=0, limit=None):
@@ -165,20 +168,16 @@ class MongoStorageBackend(IStorageBackend):
             end_index = None
         if not self.container_exists(c_id):
             raise KeyError
-        c = self.db.containers.find_one({'_id': ObjectId(c_id)})
+        c = self.db.containers.find_one({'_id': c_id})
         return c['members'][offset:end_index]
 
     def container_exists(self, c_id):
-        try:
-            return bool(self.db.containers.find_one({'_id': ObjectId(c_id)}))
-        except InvalidId:
-            raise KeyError
+        return bool(self.db.containers.find_one({'_id': c_id}))
 
     def member_exists(self, c_id, m_id):
-        try:
-            c = self.db.containers.find_one({'_id': ObjectId(c_id)})
-        except InvalidId:
-            raise KeyError
+        c = self.db.containers.find_one({'_id': c_id})
+        if c is None:
+            raise KeyError("No such container: {}".format(c_id))
         return m_id in c['members']
 
 
@@ -207,12 +206,16 @@ class RedisStorageBackend(IStorageBackend):
 
     def add_member(self, c_id, m_id):
         if not self.container_exists(c_id):
-            raise ValueError("Can't put a member in a container that doesn't exist")
+            raise KeyError(
+                "Can't put a member in a container that doesn't exist. c_id: {}".format(
+                    c_id
+                )
+            )
         self.r.rpush(c_id, m_id)
         return m_id
 
     def ls_members(self, c_id):
-        # Skip the 0 we're using to keep Redis form deleting our key
+        # Skip the 0 we're using to keep Redis from deleting our key
         return [x.decode("utf-8") for x in self.r.lrange(c_id, 1, -1)]
 
     def rm_member(self, c_id, m_id):

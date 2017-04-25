@@ -221,8 +221,13 @@ class RedisStorageBackend(IStorageBackend):
 
     def ls_containers(self, cursor, limit):
         results = []
-        while cursor != 0 and limit != 0:
-            cursor, data = self.r.scan(cursor=cursor, count=limit)
+        # Using count here is weird, as redis doesn't garuntee that
+        # the number of returned elements is _exactly_ the count
+        # argument. See https://redis.io/commands/scan. Thus
+        # This implementation gets a little fuzzy, and things may actually
+        # return a # of elements slightly greater than limit at the moment
+        while cursor != 0 and limit > 0:
+            cursor, data = self.r.scan(cursor=cursor)
             if limit:
                 limit = limit - len(data)
             for item in data:
@@ -279,7 +284,7 @@ pagination_args_parser.add_argument(
 
 def check_limit(limit):
     if limit > BLUEPRINT.config.get("MAX_LIMIT", 1000):
-        log.warn(
+        log.warning(
             "Received request above MAX_LIMIT (or 1000 if undefined), capping.")
         limit = BLUEPRINT.config.get("MAX_LIMIT", 1000)
     return limit
@@ -308,12 +313,15 @@ class Root(Resource):
         parser = pagination_args_parser.copy()
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
-        paginated_ids = BLUEPRINT.config['storage'].ls_containers(cursor=args['cursor'], limit=args['limit'])[1]
+        next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_containers(cursor=args['cursor'], limit=args['limit'])
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
                            x in paginated_ids],
-            "cursor": args['cursor'],
-            "limit": args['limit'],
+            "pagination": {
+                "cursor": args['cursor'],
+                "limit": args['limit'],
+                "next_cursor": next_cursor
+            },
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
 
@@ -388,12 +396,15 @@ class Container(Resource):
         try:
             if not BLUEPRINT.config['storage'].container_exists(container_id):
                 raise KeyError
-            paginated_ids = BLUEPRINT.config['storage'].ls_members(container_id, cursor=args['cursor'], limit=args['limit'])[1]
+            next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_members(container_id, cursor=args['cursor'], limit=args['limit'])
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
                             x in paginated_ids],
-                "cursor": args['cursor'],
-                "limit": args['limit'],
+                "pagination": {
+                    "cursor": args['cursor'],
+                    "limit": args['limit'],
+                    "next_cursor": next_cursor
+                },
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:

@@ -55,6 +55,18 @@ class RAMIdnestTestCase(unittest.TestCase):
         self.assertIn("identifier", rj['Minted'][0])
         return rj['Minted'][0]['identifier']
 
+    def remove_container(self, c_id):
+        rv = self.app.delete("/{}/".format(c_id))
+        rj = self.response_200_json(rv)
+        self.assertIn("Deleted", rj)
+        return rj
+
+    def remove_member(self, c_id, m_id):
+        rv = self.app.delete("/{}/{}".format(c_id, m_id))
+        rj = self.response_200_json(rv)
+        self.assertIn("Deleted", rj)
+        return rj
+
     def add_multiple_containers(self, num=2):
         rv = self.app.post("/", data={"num": num})
         rj = self.response_200_json(rv)
@@ -117,6 +129,20 @@ class RAMIdnestTestCase(unittest.TestCase):
     def test_get_html_member_add(self):
         rv = self.app.get("/{}/add".format(uuid4().hex))
         self.assertEqual(rv.status_code, 200)
+
+    def test_removing_empty_container(self):
+        c_id = self.add_container()
+        self.remove_container(c_id)
+
+    def test_removing_member(self):
+        c_id = self.add_container()
+        m_id = self.add_member(c_id)
+        self.remove_member(c_id, m_id)
+
+    def test_removing_popualted_container(self):
+        c_id = self.add_container()
+        m_id = self.add_member(c_id)
+        self.remove_container(c_id)
 
 
 class MongoIdnestTestCase(RAMIdnestTestCase):

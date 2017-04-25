@@ -249,7 +249,7 @@ class RedisStorageBackend(IStorageBackend):
 
     def ls_members(self, c_id, cursor, limit):
         def peek(c_id, cursor, limit):
-            if len([x for x in self.r.lrange(c_id, cursor+limit, cursor+limit+1)]) > 0:
+            if len([x for x in self.r.lrange(c_id, cursor+limit, cursor+limit)]) > 0:
                 return str(cursor+limit)
             else:
                 return None

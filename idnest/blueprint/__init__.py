@@ -198,8 +198,12 @@ class RedisStorageBackend(IStorageBackend):
         self.r.delete(c_id)
         return c_id
 
-    def ls_containers(self):
-        return [x.decode("utf-8") for x in self.r.scan_iter()]
+    def ls_containers(self, offset=0, limit=None):
+        if limit:
+            limit = offset+limit
+        # TODO
+        # This can probably be done way more effeciently
+        return [x.decode("utf-8") for x in self.r.scan_iter()][offset:limit]
 
     def container_exists(self, c_id):
         return c_id in self.r
@@ -214,9 +218,14 @@ class RedisStorageBackend(IStorageBackend):
         self.r.rpush(c_id, m_id)
         return m_id
 
-    def ls_members(self, c_id):
+    def ls_members(self, c_id, offset=0, limit=None):
         # Skip the 0 we're using to keep Redis from deleting our key
-        return [x.decode("utf-8") for x in self.r.lrange(c_id, 1, -1)]
+        offset = offset+1
+        if limit is None:
+            limit = -1
+        else:
+            limit = offset+limit
+        return [x.decode("utf-8") for x in self.r.lrange(c_id, offset, limit)]
 
     def rm_member(self, c_id, m_id):
         self.r.lrem(c_id, 1, m_id)
@@ -268,7 +277,7 @@ class Root(Resource):
         parser = pagination_args_parser.copy()
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
-        all_ids = BLUEPRINT.config['storage'].ls_containers()
+        all_ids = BLUEPRINT.config['storage'].ls_containers(offset=args['offset'], limit=args['limit'])
         total_containers = len(all_ids)
         paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
         return {
@@ -276,7 +285,6 @@ class Root(Resource):
                            x in paginated_ids],
             "offset": args['offset'],
             "limit": args['limit'],
-            "total": total_containers,
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
 
@@ -350,15 +358,12 @@ class Container(Resource):
         try:
             if not BLUEPRINT.config['storage'].container_exists(container_id):
                 raise KeyError
-            all_ids = BLUEPRINT.config['storage'].ls_members(container_id)
-            total_members = len(all_ids)
-            paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
+            paginated_ids = BLUEPRINT.config['storage'].ls_members(container_id, offset=args['offset'], limit=args['limit'])
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
                             x in paginated_ids],
                 "offset": args['offset'],
                 "limit": args['limit'],
-                "total": total_members,
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
@@ -367,15 +372,11 @@ class Container(Resource):
 
     def delete(self, container_id):
         log.info("Received DELETE @ Container endpoint")
-        try:
-            BLUEPRINT.config['storage'].rm_container(container_id)
-            return {
-                "Deleted": True,
-                "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
-            }
-        except KeyError:
-            log.critical("Container with id {} not found".format(container_id))
-            abort(404)
+        BLUEPRINT.config['storage'].rm_container(container_id)
+        return {
+            "Deleted": True,
+            "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+        }
 
 
 class Member(Resource):
@@ -397,18 +398,13 @@ class Member(Resource):
 
     def delete(self, container_id, member_id):
         log.info("Received DELETE @ Member endpoint")
-        try:
-            BLUEPRINT.config['storage'].rm_member(container_id, member_id)
-            return {
-                "Deleted": True,
-                "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
-                "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
-            }
-        except KeyError:
-            log.critical("Container with id {} ".format(container_id) +
-                        "or member with id {} ".format(member_id) +
-                        "not found")
-            abort(404)
+        BLUEPRINT.config['storage'].rm_member(container_id, member_id)
+        return {
+            "Deleted": True,
+            "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
+            "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+        }
+
 
 # Let the application context clobber any config options here
 @BLUEPRINT.record

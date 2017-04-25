@@ -155,15 +155,29 @@ class RAMIdnestTestCase(unittest.TestCase):
 
     def test_removing_popualted_container(self):
         c_id = self.add_container()
-        m_id = self.add_member(c_id)
+        self.add_member(c_id)
         self.remove_container(c_id)
+
+    def test_container_limit_knockdown(self):
+        rv = self.app.get("/", data={"limit": 999999999999999999})
+        rj = self.response_200_json(rv)
+        self.assertEqual(rj['limit'], 1000)
+
+    def test_member_limit_knockdown(self):
+        c_id = self.add_container()
+        m_ids = []
+        for _ in range(20):
+            m_ids.append(self.add_member(c_id))
+        rv = self.app.get("/{}/".format(c_id), data={"limit": 9999999999999999})
+        rj = self.response_200_json(rv)
+        self.assertEqual(rj['limit'], 1000)
 
 
 class MongoIdnestTestCase(RAMIdnestTestCase):
     def setUp(self):
         self.app = idnest.app.test_client()
         idnest.blueprint.BLUEPRINT.config['MONGO_HOST'] = "localhost"
-        idnest.blueprint.BLUEPRINT.config['MONGO_DB']= "test"
+        idnest.blueprint.BLUEPRINT.config['MONGO_DB'] = "test"
         idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.MongoStorageBackend(idnest.blueprint.BLUEPRINT)
 
     def tearDown(self):

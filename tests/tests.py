@@ -172,6 +172,13 @@ class RAMIdnestTestCase(unittest.TestCase):
         rj = self.response_200_json(rv)
         self.assertEqual(rj['limit'], 1000)
 
+    def test_pagination_wrap(self):
+        pass
+
+    def test_outside_pagination_range_containers(self):
+        rv = self.app.get("/", data={"offset": 99999999999999999})
+        rj = self.response_200_json(rv)
+
 
 class MongoIdnestTestCase(RAMIdnestTestCase):
     def setUp(self):

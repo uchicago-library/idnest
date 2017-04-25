@@ -58,11 +58,12 @@ class IStorageBackend(metaclass=ABCMeta):
         return [self.rm_container(c_id) for c_id in c_ids]
 
     @abstractmethod
-    def ls_containers(self, offset, limit):
+    def ls_containers(self, cursor, limit):
         pass
 
+    @abstractmethod
     def container_exists(self, qc_id):
-        return qc_id in self.ls_containers(0, None)
+        pass
 
     @abstractmethod
     def add_member(self, c_id, m_id):
@@ -72,7 +73,7 @@ class IStorageBackend(metaclass=ABCMeta):
         return [self.add_member(c_id, m_id) for m_id in m_ids]
 
     @abstractmethod
-    def ls_members(self, c_id, offset, limit):
+    def ls_members(self, c_id, cursor, limit):
         pass
 
     @abstractmethod
@@ -82,8 +83,9 @@ class IStorageBackend(metaclass=ABCMeta):
     def rm_members(self, c_id, m_ids):
         return [self.rm_member(c_id, m_id) for m_id in m_ids]
 
+    @abstractmethod
     def member_exists(self, c_id, qm_id):
-        return qm_id in self.ls_members(c_id, 0, None)
+        pass
 
 
 class RAMStorageBackend(IStorageBackend):
@@ -102,12 +104,15 @@ class RAMStorageBackend(IStorageBackend):
             pass
         return c_id
 
-    def ls_containers(self, offset, limit):
-        if limit:
-            end_index = offset+limit
-        else:
-            end_index = None
-        return list(self.data.keys())[offset:end_index]
+    def ls_containers(self, cursor, limit):
+        def peek(cursor, limit):
+            try:
+                sorted(self.data.keys())[cursor+limit]
+                return str(cursor+limit)
+            except IndexError:
+                return None
+        cursor = int(cursor)
+        return peek(cursor, limit), list(sorted(self.data.keys()))[cursor:cursor+limit]
 
     def add_member(self, c_id, m_id):
         self.data[c_id].append(m_id)
@@ -120,12 +125,24 @@ class RAMStorageBackend(IStorageBackend):
             pass
         return m_id
 
-    def ls_members(self, c_id, offset, limit):
-        if limit:
-            end_index = offset+limit
-        else:
-            end_index = None
-        return self.data[c_id][offset:end_index]
+    def ls_members(self, c_id, cursor, limit):
+        def peek(cursor, limit):
+            try:
+                self.data[c_id][cursor+limit]
+                return str(cursor+limit)
+            except IndexError:
+                return None
+        cursor = int(cursor)
+        return peek(cursor, limit), self.data[c_id][cursor:cursor+limit]
+
+    def container_exists(self, c_id):
+        return c_id in self.data.keys()
+
+    def member_exists(self, c_id, m_id):
+        try:
+            return m_id in self.data[c_id]
+        except KeyError:
+            return False
 
 
 class MongoStorageBackend(IStorageBackend):
@@ -143,11 +160,16 @@ class MongoStorageBackend(IStorageBackend):
         self.db.containers.delete_one({'_id': c_id})
         return c_id
 
-    def ls_containers(self, offset, limit):
-        if limit:
-            return [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(offset).limit(limit)]
-        else:
-            return [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(offset)]
+    def ls_containers(self, cursor, limit):
+        def peek(cursor, limit):
+            if len([str(x['_id']) for x in
+                    self.db.containers.find().sort('_id', ASCENDING).\
+                    skip(cursor+limit).limit(1)]) > 0:
+                    return str(cursor+limit)
+            else:
+                    return None
+        cursor = int(cursor)
+        return peek(cursor, limit), [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(cursor).limit(limit)]
 
     def add_member(self, c_id, m_id):
         r = self.db.containers.update_one({'_id': c_id}, {'$push': {'members': m_id}})
@@ -159,15 +181,16 @@ class MongoStorageBackend(IStorageBackend):
         self.db.containers.update_one({'_id': c_id}, {'$pull': {'members': m_id}})
         return m_id
 
-    def ls_members(self, c_id, offset, limit):
-        if limit:
-            end_index = offset + limit
-        else:
-            end_index = None
-        if not self.container_exists(c_id):
-            raise KeyError
+    def ls_members(self, c_id, cursor, limit):
+        def peek(cursor, limit, members):
+            try:
+                members[cursor+limit]
+                return str(cursor+limit)
+            except IndexError:
+                return None
+        cursor = int(cursor)
         c = self.db.containers.find_one({'_id': c_id})
-        return c['members'][offset:end_index]
+        return peek(cursor, limit, c['members']), c['members'][cursor:cursor+limit]
 
     def container_exists(self, c_id):
         return bool(self.db.containers.find_one({'_id': c_id}))
@@ -175,7 +198,7 @@ class MongoStorageBackend(IStorageBackend):
     def member_exists(self, c_id, m_id):
         c = self.db.containers.find_one({'_id': c_id})
         if c is None:
-            raise KeyError("No such container: {}".format(c_id))
+            return False
         return m_id in c['members']
 
 
@@ -196,12 +219,15 @@ class RedisStorageBackend(IStorageBackend):
         self.r.delete(c_id)
         return c_id
 
-    def ls_containers(self, offset, limit):
-        if limit:
-            limit = offset+limit
-        # TODO
-        # This can probably be done way more effeciently
-        return [x.decode("utf-8") for x in self.r.scan_iter()][offset:limit]
+    def ls_containers(self, cursor, limit):
+        results = []
+        while cursor != 0 and limit != 0:
+            cursor, data = self.r.scan(cursor=cursor, count=limit)
+            if limit:
+                limit = limit - len(data)
+            for item in data:
+                results.append(item)
+        return None if cursor == 0 else str(cursor), [x.decode("utf-8") for x in results]
 
     def container_exists(self, c_id):
         return c_id in self.r
@@ -216,18 +242,24 @@ class RedisStorageBackend(IStorageBackend):
         self.r.rpush(c_id, m_id)
         return m_id
 
-    def ls_members(self, c_id, offset, limit):
+    def ls_members(self, c_id, cursor, limit):
+        def peek(c_id, cursor, limit):
+            if len([x for x in self.r.lrange(c_id, cursor+limit, 1)]) > 0:
+                return str(cursor+limit)
+            else:
+                return None
+        cursor = int(cursor)
         # Skip the 0 we're using to keep Redis from deleting our key
-        offset = offset+1
-        if limit is None:
-            limit = -1
-        else:
-            limit = offset+limit
-        return [x.decode("utf-8") for x in self.r.lrange(c_id, offset, limit)]
+        cursor = cursor+1
+        limit = cursor+limit
+        return peek(c_id, cursor, limit), [x.decode("utf-8") for x in self.r.lrange(c_id, cursor, limit)]
 
     def rm_member(self, c_id, m_id):
         self.r.lrem(c_id, 1, m_id)
         return m_id
+
+    def member_exists(self, c_id, m_id):
+        return m_id in (x.decode("utf-8") for x in self.r.lrange(c_id, 1, -1))
 
 
 def output_html(data, code, headers=None):
@@ -238,7 +270,7 @@ def output_html(data, code, headers=None):
 
 pagination_args_parser = reqparse.RequestParser()
 pagination_args_parser.add_argument(
-    'offset', type=int, default=0
+    'cursor', type=str, default="0"
 )
 pagination_args_parser.add_argument(
     'limit', type=int, default=1000
@@ -276,11 +308,11 @@ class Root(Resource):
         parser = pagination_args_parser.copy()
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
-        paginated_ids = BLUEPRINT.config['storage'].ls_containers(offset=args['offset'], limit=args['limit'])
+        paginated_ids = BLUEPRINT.config['storage'].ls_containers(cursor=args['cursor'], limit=args['limit'])[1]
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
                            x in paginated_ids],
-            "offset": args['offset'],
+            "cursor": args['cursor'],
             "limit": args['limit'],
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
@@ -356,11 +388,11 @@ class Container(Resource):
         try:
             if not BLUEPRINT.config['storage'].container_exists(container_id):
                 raise KeyError
-            paginated_ids = BLUEPRINT.config['storage'].ls_members(container_id, offset=args['offset'], limit=args['limit'])
+            paginated_ids = BLUEPRINT.config['storage'].ls_members(container_id, cursor=args['cursor'], limit=args['limit'])[1]
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
                             x in paginated_ids],
-                "offset": args['offset'],
+                "cursor": args['cursor'],
                 "limit": args['limit'],
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }

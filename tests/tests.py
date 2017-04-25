@@ -172,7 +172,7 @@ class RAMIdnestTestCase(unittest.TestCase):
         rj = self.response_200_json(rv)
         self.assertEqual(rj['pagination']['limit'], 1000)
 
-    def test_pagination_wrap(self):
+    def test_containers_pagination_wrap(self):
         c_ids = []
         for _ in range(1234):
             c_ids.append(self.add_container())
@@ -191,9 +191,32 @@ class RAMIdnestTestCase(unittest.TestCase):
         for x in c_ids:
             self.assertIn(x, comp_c_ids)
 
+    def test_members_pagination_wrap(self):
+        c_id = self.add_container()
+        m_ids = []
+        for _ in range(1234):
+            m_ids.append(self.add_member(c_id))
+        self.assertEqual(len(m_ids), len(set(m_ids)))
+        self.assertEqual(len(m_ids), 1234)
+        next_cursor = "0"
+        comp_m_ids = []
+        while next_cursor is not None:
+            rv = self.app.get("/{}/".format(c_id), data={"limit": 200, "cursor": next_cursor})
+            rj = self.response_200_json(rv)
+            next_cursor = rj['pagination']['next_cursor']
+            for x in rj['Members']:
+                comp_m_ids.append(x['identifier'])
+        self.assertEqual(len(m_ids), len(comp_m_ids))
+        self.assertEqual(len(comp_m_ids), len(set(comp_m_ids)))
+        for x in m_ids:
+            self.assertIn(x, comp_m_ids)
+
     def test_outside_pagination_range_containers(self):
         rv = self.app.get("/", data={"offset": 1001})
         rj = self.response_200_json(rv)
+
+    def test_outside_pagination_range_members(self):
+        pass
 
 
 class MongoIdnestTestCase(RAMIdnestTestCase):

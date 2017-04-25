@@ -249,15 +249,15 @@ class RedisStorageBackend(IStorageBackend):
 
     def ls_members(self, c_id, cursor, limit):
         def peek(c_id, cursor, limit):
-            if len([x for x in self.r.lrange(c_id, cursor+limit, 1)]) > 0:
+            if len([x for x in self.r.lrange(c_id, cursor+limit, cursor+limit+1)]) > 0:
                 return str(cursor+limit)
             else:
                 return None
         cursor = int(cursor)
         # Skip the 0 we're using to keep Redis from deleting our key
-        cursor = cursor+1
-        limit = cursor+limit
-        return peek(c_id, cursor, limit), [x.decode("utf-8") for x in self.r.lrange(c_id, cursor, limit)]
+        if cursor == 0:
+            cursor = 1
+        return peek(c_id, cursor, limit), [x.decode("utf-8") for x in self.r.lrange(c_id, cursor, cursor+limit-1)]
 
     def rm_member(self, c_id, m_id):
         self.r.lrem(c_id, 1, m_id)

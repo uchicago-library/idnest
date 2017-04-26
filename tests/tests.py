@@ -7,6 +7,7 @@ from pymongo import MongoClient
 
 class RAMIdnestTestCase(unittest.TestCase):
     def setUp(self):
+        idnest.app.config['TESTING'] = True
         self.app = idnest.app.test_client()
         idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
 

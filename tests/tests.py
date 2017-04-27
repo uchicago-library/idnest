@@ -7,6 +7,7 @@ from pymongo import MongoClient
 
 class RAMIdnestTestCase(unittest.TestCase):
     def setUp(self):
+        idnest.app.config['TESTING'] = True
         self.app = idnest.app.test_client()
         idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
 
@@ -159,25 +160,64 @@ class RAMIdnestTestCase(unittest.TestCase):
         self.remove_container(c_id)
 
     def test_container_limit_knockdown(self):
-        rv = self.app.get("/", data={"limit": 999999999999999999})
+        rv = self.app.get("/", data={"limit": 1001})
         rj = self.response_200_json(rv)
-        self.assertEqual(rj['limit'], 1000)
+        self.assertEqual(rj['pagination']['limit'], 1000)
 
     def test_member_limit_knockdown(self):
         c_id = self.add_container()
         m_ids = []
         for _ in range(20):
             m_ids.append(self.add_member(c_id))
-        rv = self.app.get("/{}/".format(c_id), data={"limit": 9999999999999999})
+        rv = self.app.get("/{}/".format(c_id), data={"limit": 1001})
         rj = self.response_200_json(rv)
-        self.assertEqual(rj['limit'], 1000)
+        self.assertEqual(rj['pagination']['limit'], 1000)
 
-    def test_pagination_wrap(self):
-        pass
+    def test_containers_pagination_wrap(self):
+        c_ids = []
+        for _ in range(1234):
+            c_ids.append(self.add_container())
+        self.assertEqual(len(c_ids), len(set(c_ids)))
+        self.assertEqual(len(c_ids), 1234)
+        next_cursor = "0"
+        comp_c_ids = []
+        while next_cursor is not None:
+            rv = self.app.get("/", data={"limit": 200, "cursor": next_cursor})
+            rj = self.response_200_json(rv)
+            next_cursor = rj['pagination']['next_cursor']
+            for x in rj['Containers']:
+                comp_c_ids.append(x['identifier'])
+        self.assertEqual(len(c_ids), len(comp_c_ids))
+        self.assertEqual(len(comp_c_ids), len(set(comp_c_ids)))
+        for x in c_ids:
+            self.assertIn(x, comp_c_ids)
+
+    def test_members_pagination_wrap(self):
+        c_id = self.add_container()
+        m_ids = []
+        for _ in range(1234):
+            m_ids.append(self.add_member(c_id))
+        self.assertEqual(len(m_ids), len(set(m_ids)))
+        self.assertEqual(len(m_ids), 1234)
+        next_cursor = "0"
+        comp_m_ids = []
+        while next_cursor is not None:
+            rv = self.app.get("/{}/".format(c_id), data={"limit": 200, "cursor": next_cursor})
+            rj = self.response_200_json(rv)
+            next_cursor = rj['pagination']['next_cursor']
+            for x in rj['Members']:
+                comp_m_ids.append(x['identifier'])
+        self.assertEqual(len(m_ids), len(comp_m_ids))
+        self.assertEqual(len(comp_m_ids), len(set(comp_m_ids)))
+        for x in m_ids:
+            self.assertIn(x, comp_m_ids)
 
     def test_outside_pagination_range_containers(self):
-        rv = self.app.get("/", data={"offset": 99999999999999999})
+        rv = self.app.get("/", data={"offset": 1001})
         rj = self.response_200_json(rv)
+
+    def test_outside_pagination_range_members(self):
+        pass
 
 
 class MongoIdnestTestCase(RAMIdnestTestCase):

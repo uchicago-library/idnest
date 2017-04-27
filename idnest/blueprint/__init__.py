@@ -6,13 +6,14 @@ from flask import Blueprint, abort, Response
 from flask_restful import Resource, Api, reqparse
 from pymongo import MongoClient, ASCENDING
 import redis
-from bson.objectid import ObjectId
 
 
 BLUEPRINT = Blueprint('idnest', __name__)
 
 
-BLUEPRINT.config = {}
+BLUEPRINT.config = {
+    'STORAGE_BACKEND': 'noerror'
+}
 
 
 API = Api(BLUEPRINT)
@@ -57,11 +58,12 @@ class IStorageBackend(metaclass=ABCMeta):
         return [self.rm_container(c_id) for c_id in c_ids]
 
     @abstractmethod
-    def ls_containers(self, offset=0, limit=None):
+    def ls_containers(self, cursor, limit):
         pass
 
+    @abstractmethod
     def container_exists(self, qc_id):
-        return qc_id in self.ls_containers()
+        pass
 
     @abstractmethod
     def add_member(self, c_id, m_id):
@@ -71,7 +73,7 @@ class IStorageBackend(metaclass=ABCMeta):
         return [self.add_member(c_id, m_id) for m_id in m_ids]
 
     @abstractmethod
-    def ls_members(self, c_id, offset=0, limit=None):
+    def ls_members(self, c_id, cursor, limit):
         pass
 
     @abstractmethod
@@ -81,16 +83,14 @@ class IStorageBackend(metaclass=ABCMeta):
     def rm_members(self, c_id, m_ids):
         return [self.rm_member(c_id, m_id) for m_id in m_ids]
 
+    @abstractmethod
     def member_exists(self, c_id, qm_id):
-        return qm_id in self.ls_members(c_id)
+        pass
 
 
 class RAMStorageBackend(IStorageBackend):
-
-    data = {}
-
     def __init__(self, bp):
-        pass
+        self.data = {}
 
     def mint_container(self):
         new_c_id = uuid4().hex
@@ -98,88 +98,107 @@ class RAMStorageBackend(IStorageBackend):
         return new_c_id
 
     def rm_container(self, c_id):
-        del self.data[c_id]
+        try:
+            del self.data[c_id]
+        except KeyError:
+            pass
         return c_id
 
-    def ls_containers(self, offset=0, limit=None):
-        if limit:
-            end_index = offset+limit
-        else:
-            end_index = None
-        return list(self.data.keys())[offset:end_index]
+    def ls_containers(self, cursor, limit):
+        def peek(cursor, limit):
+            try:
+                sorted(self.data.keys())[cursor+limit]
+                return str(cursor+limit)
+            except IndexError:
+                return None
+        cursor = int(cursor)
+        return peek(cursor, limit), list(sorted(self.data.keys()))[cursor:cursor+limit]
 
     def add_member(self, c_id, m_id):
         self.data[c_id].append(m_id)
         return m_id
 
     def rm_member(self, c_id, m_id):
-        self.data[c_id].remove(m_id)
+        try:
+            self.data[c_id].remove(m_id)
+        except ValueError:
+            pass
         return m_id
 
-    def ls_members(self, c_id, offset=0, limit=None):
-        if limit:
-            end_index = offset+limit
-        else:
-            end_index = None
-        return self.data[c_id][offset:end_index]
+    def ls_members(self, c_id, cursor, limit):
+        def peek(cursor, limit):
+            try:
+                self.data[c_id][cursor+limit]
+                return str(cursor+limit)
+            except IndexError:
+                return None
+        cursor = int(cursor)
+        return peek(cursor, limit), self.data[c_id][cursor:cursor+limit]
+
+    def container_exists(self, c_id):
+        return c_id in self.data.keys()
+
+    def member_exists(self, c_id, m_id):
+        try:
+            return m_id in self.data[c_id]
+        except KeyError:
+            return False
 
 
 class MongoStorageBackend(IStorageBackend):
-
-    # NOTE: This class assumes something else is assigning a .db attribute to it
-    # so that it can communicate with the @classmethods. If you don't assign a
-    # .db attribute to the class at some point, nothing will work. In this case,
-    # we do this with some flask black magic callback nonsense on registering
-    # the blueprint to an application at the bottom of this file.
-
     def __init__(self, bp):
-        client = MongoClient(bp.config.get("MONGO_HOST"),
+        client = MongoClient(bp.config["MONGO_HOST"],
                              bp.config.get("MONGO_PORT", 27017))
         self.db = client[bp.config["MONGO_DB"]]
 
     def mint_container(self):
-        new_c = self.db.containers.insert_one({'members': []})
-        return str(new_c.inserted_id)
+        id = uuid4().hex
+        self.db.containers.insert_one({'members': [], '_id': id})
+        return id
 
     def rm_container(self, c_id):
-        r = self.db.containers.delete_one({'_id': ObjectId(c_id)})
-        if r.deleted_count < 1:
-            raise KeyError
+        self.db.containers.delete_one({'_id': c_id})
         return c_id
 
-    def ls_containers(self, offset=0, limit=None):
-        if limit:
-            return [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(offset).limit(limit)]
-        else:
-            return [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(offset)]
+    def ls_containers(self, cursor, limit):
+        def peek(cursor, limit):
+            if len([str(x['_id']) for x in
+                    self.db.containers.find().sort('_id', ASCENDING).\
+                    skip(cursor+limit).limit(1)]) > 0:
+                    return str(cursor+limit)
+            else:
+                    return None
+        cursor = int(cursor)
+        return peek(cursor, limit), [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(cursor).limit(limit)]
 
     def add_member(self, c_id, m_id):
-        r = self.db.containers.update_one({'_id': ObjectId(c_id)}, {'$push': {'members': m_id}})
+        r = self.db.containers.update_one({'_id': c_id}, {'$push': {'members': m_id}})
         if r.modified_count < 1:
             raise KeyError
         return m_id
 
     def rm_member(self, c_id, m_id):
-        r = self.db.containers.update_one({'_id': ObjectId(c_id)}, {'$pull': {'members': m_id}})
-        if r.modified_count < 1:
-            raise KeyError
+        self.db.containers.update_one({'_id': c_id}, {'$pull': {'members': m_id}})
         return m_id
 
-    def ls_members(self, c_id, offset=0, limit=None):
-        if limit:
-            end_index = offset + limit
-        else:
-            end_index = None
-        if not self.container_exists(c_id):
-            raise KeyError
-        c = self.db.containers.find_one({'_id': ObjectId(c_id)})
-        return c['members'][offset:end_index]
+    def ls_members(self, c_id, cursor, limit):
+        def peek(cursor, limit, members):
+            try:
+                members[cursor+limit]
+                return str(cursor+limit)
+            except IndexError:
+                return None
+        cursor = int(cursor)
+        c = self.db.containers.find_one({'_id': c_id})
+        return peek(cursor, limit, c['members']), c['members'][cursor:cursor+limit]
 
     def container_exists(self, c_id):
-        return bool(self.db.containers.find_one({'_id': ObjectId(c_id)}))
+        return bool(self.db.containers.find_one({'_id': c_id}))
 
     def member_exists(self, c_id, m_id):
-        c = self.db.containers.find_one({'_id': ObjectId(c_id)})
+        c = self.db.containers.find_one({'_id': c_id})
+        if c is None:
+            return False
         return m_id in c['members']
 
 
@@ -200,25 +219,52 @@ class RedisStorageBackend(IStorageBackend):
         self.r.delete(c_id)
         return c_id
 
-    def ls_containers(self):
-        return [x.decode("utf-8") for x in self.r.scan_iter()]
+    def ls_containers(self, cursor, limit):
+        results = []
+        # Using count here is weird, as redis doesn't garuntee that
+        # the number of returned elements is _exactly_ the count
+        # argument. See https://redis.io/commands/scan. Thus
+        # This implementation gets a little fuzzy, and things may actually
+        # return a # of elements slightly greater than limit at the moment
+        while cursor != 0 and limit > 0:
+            cursor, data = self.r.scan(cursor=cursor)
+            if limit:
+                limit = limit - len(data)
+            for item in data:
+                results.append(item)
+        return None if cursor == 0 else str(cursor), [x.decode("utf-8") for x in results]
 
     def container_exists(self, c_id):
         return c_id in self.r
 
     def add_member(self, c_id, m_id):
         if not self.container_exists(c_id):
-            raise ValueError("Can't put a member in a container that doesn't exist")
+            raise KeyError(
+                "Can't put a member in a container that doesn't exist. c_id: {}".format(
+                    c_id
+                )
+            )
         self.r.rpush(c_id, m_id)
         return m_id
 
-    def ls_members(self, c_id):
-        # Skip the 0 we're using to keep Redis form deleting our key
-        return [x.decode("utf-8") for x in self.r.lrange(c_id, 1, -1)]
+    def ls_members(self, c_id, cursor, limit):
+        def peek(c_id, cursor, limit):
+            if len([x for x in self.r.lrange(c_id, cursor+limit, cursor+limit)]) > 0:
+                return str(cursor+limit)
+            else:
+                return None
+        cursor = int(cursor)
+        # Skip the 0 we're using to keep Redis from deleting our key
+        if cursor == 0:
+            cursor = 1
+        return peek(c_id, cursor, limit), [x.decode("utf-8") for x in self.r.lrange(c_id, cursor, cursor+limit-1)]
 
     def rm_member(self, c_id, m_id):
         self.r.lrem(c_id, 1, m_id)
         return m_id
+
+    def member_exists(self, c_id, m_id):
+        return m_id in (x.decode("utf-8") for x in self.r.lrange(c_id, 1, -1))
 
 
 def output_html(data, code, headers=None):
@@ -229,15 +275,16 @@ def output_html(data, code, headers=None):
 
 pagination_args_parser = reqparse.RequestParser()
 pagination_args_parser.add_argument(
-    'offset', type=int, default=0
+    'cursor', type=str, default="0"
 )
 pagination_args_parser.add_argument(
     'limit', type=int, default=1000
 )
 
+
 def check_limit(limit):
     if limit > BLUEPRINT.config.get("MAX_LIMIT", 1000):
-        log.warn(
+        log.warning(
             "Received request above MAX_LIMIT (or 1000 if undefined), capping.")
         limit = BLUEPRINT.config.get("MAX_LIMIT", 1000)
     return limit
@@ -266,17 +313,18 @@ class Root(Resource):
         parser = pagination_args_parser.copy()
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
-        all_ids = BLUEPRINT.config['storage'].ls_containers()
-        total_containers = len(all_ids)
-        paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
+        next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_containers(cursor=args['cursor'], limit=args['limit'])
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
                            x in paginated_ids],
-            "offset": args['offset'],
-            "limit": args['limit'],
-            "total": total_containers,
+            "pagination": {
+                "cursor": args['cursor'],
+                "limit": args['limit'],
+                "next_cursor": next_cursor
+            },
             "_self": {"identifier": None, "_link": API.url_for(Root)}
         }
+
 
 class HTMLMint(Resource):
     def get(self):
@@ -284,12 +332,12 @@ class HTMLMint(Resource):
         resp = """<html>
     <body>
         <h1>
-		Mint a Container Identifier
+        Mint a Container Identifier
         </h1>
         <form action="."
         method="post">
         <p>
-		<div>
+        <div>
         <input type="submit" value="Mint">
         </div>
         </form>
@@ -308,11 +356,11 @@ class HTMLMemberAdd(Resource):
         </h1>
         <form action="./{}/"
         method="post">
-		<p>
+        <p>
         Member Identifier:<br>
         <input type="text" name="member" size="30">
         </p>
-		<div>
+        <div>
         <input type="submit" value="Add">
         </div>
         </form>
@@ -348,15 +396,15 @@ class Container(Resource):
         try:
             if not BLUEPRINT.config['storage'].container_exists(container_id):
                 raise KeyError
-            all_ids = BLUEPRINT.config['storage'].ls_members(container_id)
-            total_members = len(all_ids)
-            paginated_ids = all_ids[args['offset']:args['offset']+args['limit']]
+            next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_members(container_id, cursor=args['cursor'], limit=args['limit'])
             return {
                 "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
                             x in paginated_ids],
-                "offset": args['offset'],
-                "limit": args['limit'],
-                "total": total_members,
+                "pagination": {
+                    "cursor": args['cursor'],
+                    "limit": args['limit'],
+                    "next_cursor": next_cursor
+                },
                 "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
             }
         except KeyError:
@@ -365,15 +413,11 @@ class Container(Resource):
 
     def delete(self, container_id):
         log.info("Received DELETE @ Container endpoint")
-        try:
-            BLUEPRINT.config['storage'].rm_container(container_id)
-            return {
-                "Deleted": True,
-                "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
-            }
-        except KeyError:
-            log.critical("Container with id {} not found".format(container_id))
-            abort(404)
+        BLUEPRINT.config['storage'].rm_container(container_id)
+        return {
+            "Deleted": True,
+            "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+        }
 
 
 class Member(Resource):
@@ -389,32 +433,37 @@ class Member(Resource):
                 raise KeyError()
         except KeyError:
             log.critical("Container with id {} ".format(container_id) +
-                        "or member with id {} ".format(member_id) +
-                        "not found")
+                         "or member with id {} ".format(member_id) +
+                         "not found")
             abort(404)
 
     def delete(self, container_id, member_id):
         log.info("Received DELETE @ Member endpoint")
-        try:
-            BLUEPRINT.config['storage'].rm_member(container_id, member_id)
-            return {
-                "Deleted": True,
-                "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
-                "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
-            }
-        except KeyError:
-            log.critical("Container with id {} ".format(container_id) +
-                        "or member with id {} ".format(member_id) +
-                        "not found")
-            abort(404)
+        BLUEPRINT.config['storage'].rm_member(container_id, member_id)
+        return {
+            "Deleted": True,
+            "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
+            "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+        }
 
-# Let the application context clober any config options here
+
+# Let the application context clobber any config options here
 @BLUEPRINT.record
 def handle_configs(setup_state):
     app = setup_state.app
     BLUEPRINT.config.update(app.config)
 
     storage_choice = BLUEPRINT.config.get("STORAGE_BACKEND")
+    if storage_choice is None:
+        raise RuntimeError(
+            "Missing required configuration value 'STORAGE_BACKEND'"
+        )
+    if not isinstance(storage_choice, str):
+        raise TypeError(
+            "STORAGE_BACKEND value is not a str, is instead a {}".format(
+                str(type(storage_choice))
+            )
+        )
 
     supported_backends = {
         "mongodb": MongoStorageBackend,
@@ -425,6 +474,7 @@ def handle_configs(setup_state):
 
     if storage_choice.lower() not in supported_backends:
         raise RuntimeError(
+            "Unsupported STORAGE_BACKEND: {}\n".format(storage_choice) +
             "Supported storage backends include: " +
             "{}".format(", ".join(supported_backends.keys()))
         )
@@ -433,10 +483,17 @@ def handle_configs(setup_state):
     else:
         BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
 
-    if BLUEPRINT.config.get("VERBOSITY"):
-        logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])
-    else:
-        logging.basicConfig(level="WARN")
+    if BLUEPRINT.config.get("VERBOSITY") is None:
+        BLUEPRINT.config["VERBOSITY"] = "WARN"
+    logging.basicConfig(level=BLUEPRINT.config["VERBOSITY"])
+
+
+@BLUEPRINT.before_request
+def before_request():
+    # Check to be sure all our pre-request configuration has been done.
+    if not isinstance(BLUEPRINT.config.get('storage'), IStorageBackend):
+        raise RuntimeError("No storage backend is configured!")
+        abort(500)
 
 
 API.add_resource(Root, "/")

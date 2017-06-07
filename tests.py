@@ -1,8 +1,12 @@
-import idnest
 import unittest
 import json
 from uuid import uuid4
 from pymongo import MongoClient
+from os import environ
+
+environ['IDNEST_DEFER_CONFIG'] = "True"
+
+import idnest
 
 
 class RAMIdnestTestCase(unittest.TestCase):

@@ -11,9 +11,7 @@ import redis
 BLUEPRINT = Blueprint('idnest', __name__)
 
 
-BLUEPRINT.config = {
-    'STORAGE_BACKEND': 'noerror'
-}
+BLUEPRINT.config = {}
 
 
 API = Api(BLUEPRINT)
@@ -453,16 +451,14 @@ def handle_configs(setup_state):
     app = setup_state.app
     BLUEPRINT.config.update(app.config)
 
+    if BLUEPRINT.config.get('DEFER_CONFIG'):
+        return
+
     storage_choice = BLUEPRINT.config.get("STORAGE_BACKEND")
+
     if storage_choice is None:
         raise RuntimeError(
             "Missing required configuration value 'STORAGE_BACKEND'"
-        )
-    if not isinstance(storage_choice, str):
-        raise TypeError(
-            "STORAGE_BACKEND value is not a str, is instead a {}".format(
-                str(type(storage_choice))
-            )
         )
 
     supported_backends = {
@@ -478,8 +474,6 @@ def handle_configs(setup_state):
             "Supported storage backends include: " +
             "{}".format(", ".join(supported_backends.keys()))
         )
-    elif storage_choice.lower() == 'noerror':
-        pass
     else:
         BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
 

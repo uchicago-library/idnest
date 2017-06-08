@@ -12,7 +12,9 @@ services:
         depends_on:
             - redis
         environment:
-            - IDNEST_CONFIG=/code/config.py
+            - IDNEST_STORAGE_BACKEND=redis
+            - IDNEST_REDIS_HOST=redis
+            - IDNEST_REDIS_DB=0
     redis:
         image: "redis"
         entrypoint: "redis-server --appendonly yes"

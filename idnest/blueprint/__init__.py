@@ -8,6 +8,9 @@ from pymongo import MongoClient, ASCENDING
 import redis
 
 
+__version__ = "0.0.1"
+
+
 BLUEPRINT = Blueprint('idnest', __name__)
 
 
@@ -445,6 +448,10 @@ class Member(Resource):
         }
 
 
+class Version(Resource):
+    def get(self):
+        return {"version": __version__}
+
 # Let the application context clobber any config options here
 @BLUEPRINT.record
 def handle_configs(setup_state):
@@ -496,3 +503,4 @@ API.add_resource(HTMLMemberAdd, "/<string:container_id>/add")
 # Trailing slash as a reminder that this is "directory-esque"
 API.add_resource(Container, "/<string:container_id>/")
 API.add_resource(Member, "/<string:container_id>/<string:member_id>")
+API.add_resource(Version, "/version")

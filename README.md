@@ -1,8 +1,10 @@
-Stable(ish)
+# idnest
 
-Under development
+[![Build Status](https://travis-ci.org/uchicago-library/idnest.svg?branch=master)](https://travis-ci.org/uchicago-library/idnest) [![Coverage Status](https://coveralls.io/repos/github/uchicago-library/idnest/badge.svg?branch=master)](https://coveralls.io/github/uchicago-library/idnest?branch=master)
 
-Basic Usage:
+v0.0.1
+
+# Basic Usage
 
 Nothing here to begin with
 ```

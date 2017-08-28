@@ -223,6 +223,11 @@ class RAMIdnestTestCase(unittest.TestCase):
     def test_outside_pagination_range_members(self):
         pass
 
+    def test_version(self):
+        rv = self.app.get("/version")
+        rj = self.response_200_json(rv)
+        self.assertEqual(rj['version'], idnest.blueprint.__version__)
+
 
 class MongoIdnestTestCase(RAMIdnestTestCase):
     def setUp(self):

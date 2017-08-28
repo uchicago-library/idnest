@@ -6,6 +6,7 @@ def readme():
 
 setup(
     name = "idnest",
+    version = "0.0.1",
     description = "A REST API for keeping track of nested relations of ids",
     long_description = readme(),
     packages = find_packages(

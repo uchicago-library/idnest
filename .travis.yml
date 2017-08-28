@@ -1,0 +1,12 @@
+language: python
+python:
+    - "3.5"
+before_script:
+    - pip install coverage && pip install python-coveralls
+install: "pip install ."
+services:
+    - mongodb
+    - redis
+script: coverage run --source idnest tests.py
+after_success:
+- coveralls

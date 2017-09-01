@@ -1,4 +1,4 @@
-FROM python:3.5-alpine
+FROM bnbalsamo/flask_stack
 ENV APP_NAME=idnest
 ARG SECRET_KEY=passThisAtBuildTime
 ARG STORAGE_BACKEND

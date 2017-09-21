@@ -18,7 +18,7 @@ setup(
         ]
     ),
     include_package_data=True,
-    url='https://github.com/bnbalsamo/idnest',
+    url='https://github.com/uchicago-library/idnest',
     install_requires=[
         'flask>0',
         'flask_env',

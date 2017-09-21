@@ -296,7 +296,29 @@ $ curl -s 127.0.0.1:5000 | python -m json.tool
 ```
 
 # Environmental Variables
-* None
+## Required
+- IDNEST_STORAGE_CHOICE: The backend to use to store the data
+    - can be any of: redis, mongo, ram
+### Required Per IDNEST_STORAGE_CHOICE
+- redis
+    - IDNEST_REDIS_HOST: The host address of the redis server
+    - IDNEST_REDIS_DB: Which redis db to use on the server
+- mongo
+    - IDNEST_MONGO_HOST: The host address of the mongo server
+    - IDNEST_MONGO_DB: The name of the mongo db to use on the server
+-ram
+    - None
+
+## Optional
+- IDNEST_DEFER_CONFIG: If set _no_ automatic configuration will occur
+- IDNEST_VERBOSITY (warn): Verbosity to run logging at
+### Optional per IDNEST_STORAGE_CHOICE
+- redis
+    - IDNEST_REDIS_PORT (6379): The port the server is running on
+- mongo
+    - IDNEST_MONGO_PORT (27017): The port the server is running on
+-ram
+    - None
 
 # Author
 Brian Balsamo <balsamo@uchicago.edu>

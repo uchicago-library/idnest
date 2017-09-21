@@ -1,8 +1,23 @@
 # idnest
 
-[![Build Status](https://travis-ci.org/uchicago-library/idnest.svg?branch=master)](https://travis-ci.org/uchicago-library/idnest) [![Coverage Status](https://coveralls.io/repos/github/uchicago-library/idnest/badge.svg?branch=master)](https://coveralls.io/github/uchicago-library/idnest?branch=master)
-
 v0.0.1
+
+[![Build Status](https://travis-ci.org/bnbalsamo/idnest.svg?branch=master)](https://travis-ci.org/bnbalsamo/idnest) [![Coverage Status](https://coveralls.io/repos/github/bnbalsamo/idnest/badge.svg?branch=master)](https://coveralls.io/github/bnbalsamo/idnest?branch=master)
+
+A RESTful API for nested identifier association
+
+# Debug Quickstart
+Set environmental variables appropriately
+```
+./debug.sh
+```
+
+# Docker Quickstart
+Inject environmental variables appropriately at either buildtime or runtime
+```
+# docker build . -t idnest
+# docker run -p 5000:80 idnest --name my_idnest
+```
 
 # Basic Usage
 
@@ -280,8 +295,8 @@ $ curl -s 127.0.0.1:5000 | python -m json.tool
 }
 ```
 
-To run tests
+# Environmental Variables
+* None
 
-```
-coverage run --source=idnest tests/tests.py && coverage report
-```
+# Author
+Brian Balsamo <balsamo@uchicago.edu>

@@ -1,26 +1,37 @@
+"""
+idnest
+"""
 from uuid import uuid4
 from abc import ABCMeta, abstractmethod
 import logging
 
-from flask import Blueprint, abort, Response
+from flask import Blueprint, jsonify, abort, Response
 from flask_restful import Resource, Api, reqparse
-from pymongo import MongoClient, ASCENDING
+
 import redis
+from pymongo import MongoClient, ASCENDING
 
+from .exceptions import Error, ImproperConfigurationError
 
+__author__ = "Brian Balsamo"
+__email__ = "balsamo@uchicago.edu"
 __version__ = "0.0.1"
 
 
 BLUEPRINT = Blueprint('idnest', __name__)
 
-
 BLUEPRINT.config = {}
-
 
 API = Api(BLUEPRINT)
 
-
 log = logging.getLogger(__name__)
+
+
+@BLUEPRINT.errorhandler(Error)
+def handle_errors(error):
+    response = jsonify(error.to_dict())
+    response.status_code = error.status_code
+    return response
 
 
 class IStorageBackend(metaclass=ABCMeta):
@@ -108,12 +119,12 @@ class RAMStorageBackend(IStorageBackend):
     def ls_containers(self, cursor, limit):
         def peek(cursor, limit):
             try:
-                sorted(self.data.keys())[cursor+limit]
-                return str(cursor+limit)
+                sorted(self.data.keys())[cursor + limit]
+                return str(cursor + limit)
             except IndexError:
                 return None
         cursor = int(cursor)
-        return peek(cursor, limit), list(sorted(self.data.keys()))[cursor:cursor+limit]
+        return peek(cursor, limit), list(sorted(self.data.keys()))[cursor:cursor + limit]
 
     def add_member(self, c_id, m_id):
         self.data[c_id].append(m_id)
@@ -129,12 +140,12 @@ class RAMStorageBackend(IStorageBackend):
     def ls_members(self, c_id, cursor, limit):
         def peek(cursor, limit):
             try:
-                self.data[c_id][cursor+limit]
-                return str(cursor+limit)
+                self.data[c_id][cursor + limit]
+                return str(cursor + limit)
             except IndexError:
                 return None
         cursor = int(cursor)
-        return peek(cursor, limit), self.data[c_id][cursor:cursor+limit]
+        return peek(cursor, limit), self.data[c_id][cursor:cursor + limit]
 
     def container_exists(self, c_id):
         return c_id in self.data.keys()
@@ -164,13 +175,16 @@ class MongoStorageBackend(IStorageBackend):
     def ls_containers(self, cursor, limit):
         def peek(cursor, limit):
             if len([str(x['_id']) for x in
-                    self.db.containers.find().sort('_id', ASCENDING).\
-                    skip(cursor+limit).limit(1)]) > 0:
-                    return str(cursor+limit)
+                    self.db.containers.find().sort('_id', ASCENDING).
+                    skip(cursor + limit).limit(1)]) > 0:
+                return str(cursor + limit)
             else:
-                    return None
+                return None
         cursor = int(cursor)
-        return peek(cursor, limit), [str(x['_id']) for x in self.db.containers.find().sort('_id', ASCENDING).skip(cursor).limit(limit)]
+        return peek(cursor, limit), \
+            [str(x['_id']) for x in self.db.containers.find()
+             .sort('_id', ASCENDING)
+             .skip(cursor).limit(limit)]
 
     def add_member(self, c_id, m_id):
         r = self.db.containers.update_one({'_id': c_id}, {'$push': {'members': m_id}})
@@ -185,13 +199,13 @@ class MongoStorageBackend(IStorageBackend):
     def ls_members(self, c_id, cursor, limit):
         def peek(cursor, limit, members):
             try:
-                members[cursor+limit]
-                return str(cursor+limit)
+                members[cursor + limit]
+                return str(cursor + limit)
             except IndexError:
                 return None
         cursor = int(cursor)
         c = self.db.containers.find_one({'_id': c_id})
-        return peek(cursor, limit, c['members']), c['members'][cursor:cursor+limit]
+        return peek(cursor, limit, c['members']), c['members'][cursor:cursor + limit]
 
     def container_exists(self, c_id):
         return bool(self.db.containers.find_one({'_id': c_id}))
@@ -250,15 +264,16 @@ class RedisStorageBackend(IStorageBackend):
 
     def ls_members(self, c_id, cursor, limit):
         def peek(c_id, cursor, limit):
-            if len([x for x in self.r.lrange(c_id, cursor+limit, cursor+limit)]) > 0:
-                return str(cursor+limit)
+            if len([x for x in self.r.lrange(c_id, cursor + limit, cursor + limit)]) > 0:
+                return str(cursor + limit)
             else:
                 return None
         cursor = int(cursor)
         # Skip the 0 we're using to keep Redis from deleting our key
         if cursor == 0:
             cursor = 1
-        return peek(c_id, cursor, limit), [x.decode("utf-8") for x in self.r.lrange(c_id, cursor, cursor+limit-1)]
+        return peek(c_id, cursor, limit), \
+            [x.decode("utf-8") for x in self.r.lrange(c_id, cursor, cursor + limit - 1)]
 
     def rm_member(self, c_id, m_id):
         self.r.lrem(c_id, 1, m_id)
@@ -274,14 +289,6 @@ def output_html(data, code, headers=None):
     resp.status_code = code
     return resp
 
-pagination_args_parser = reqparse.RequestParser()
-pagination_args_parser.add_argument(
-    'cursor', type=str, default="0"
-)
-pagination_args_parser.add_argument(
-    'limit', type=int, default=1000
-)
-
 
 def check_limit(limit):
     if limit > BLUEPRINT.config.get("MAX_LIMIT", 1000):
@@ -289,6 +296,15 @@ def check_limit(limit):
             "Received request above MAX_LIMIT (or 1000 if undefined), capping.")
         limit = BLUEPRINT.config.get("MAX_LIMIT", 1000)
     return limit
+
+
+pagination_args_parser = reqparse.RequestParser()
+pagination_args_parser.add_argument(
+    'cursor', type=str, default="0"
+)
+pagination_args_parser.add_argument(
+    'limit', type=int, default=1000
+)
 
 
 class Root(Resource):
@@ -314,7 +330,8 @@ class Root(Resource):
         parser = pagination_args_parser.copy()
         args = parser.parse_args()
         args['limit'] = check_limit(args['limit'])
-        next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_containers(cursor=args['cursor'], limit=args['limit'])
+        next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_containers(
+            cursor=args['cursor'], limit=args['limit'])
         return {
             "Containers": [{"identifier": x, "_link": API.url_for(Container, container_id=x)} for
                            x in paginated_ids],
@@ -381,9 +398,16 @@ class Container(Resource):
         log.debug("Args parsed")
         try:
             return {
-                "Added": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
-                          x in BLUEPRINT.config['storage'].add_members(container_id, args['member'])],
-                "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+                "Added": [
+                    {
+                        "identifier": x,
+                        "_link": API.url_for(Member, container_id=container_id, member_id=x)
+                    } for x in BLUEPRINT.config['storage'].add_members(container_id, args['member'])
+                ],
+                "_self": {
+                    "identifier": container_id,
+                    "_link": API.url_for(Container, container_id=container_id)
+                }
             }
         except KeyError:
             log.critical("Container with id {} not found".format(container_id))
@@ -397,16 +421,24 @@ class Container(Resource):
         try:
             if not BLUEPRINT.config['storage'].container_exists(container_id):
                 raise KeyError
-            next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_members(container_id, cursor=args['cursor'], limit=args['limit'])
+            next_cursor, paginated_ids = BLUEPRINT.config['storage'].ls_members(
+                container_id, cursor=args['cursor'], limit=args['limit'])
             return {
-                "Members": [{"identifier": x, "_link": API.url_for(Member, container_id=container_id, member_id=x)} for
-                            x in paginated_ids],
+                "Members": [
+                    {
+                        "identifier": x,
+                        "_link": API.url_for(Member, container_id=container_id, member_id=x)
+                    } for x in paginated_ids
+                ],
                 "pagination": {
                     "cursor": args['cursor'],
                     "limit": args['limit'],
                     "next_cursor": next_cursor
                 },
-                "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+                "_self": {
+                    "identifier": container_id,
+                    "_link": API.url_for(Container, container_id=container_id)
+                }
             }
         except KeyError:
             log.critical("Container with id {} not found".format(container_id))
@@ -417,7 +449,10 @@ class Container(Resource):
         BLUEPRINT.config['storage'].rm_container(container_id)
         return {
             "Deleted": True,
-            "_self": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+            "_self": {
+                "identifier": container_id,
+                "_link": API.url_for(Container, container_id=container_id)
+            }
         }
 
 
@@ -427,8 +462,15 @@ class Member(Resource):
         try:
             if BLUEPRINT.config['storage'].member_exists(container_id, member_id):
                 return {
-                    "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
-                    "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+                    "_self": {
+                        "identifier": member_id,
+                        "_link": API.url_for(
+                            Member, container_id=container_id, member_id=member_id
+                        )
+                    },
+                    "Container": {
+                        "identifier": container_id,
+                        "_link": API.url_for(Container, container_id=container_id)}
                 }
             else:
                 raise KeyError()
@@ -443,8 +485,14 @@ class Member(Resource):
         BLUEPRINT.config['storage'].rm_member(container_id, member_id)
         return {
             "Deleted": True,
-            "_self": {"identifier": member_id, "_link": API.url_for(Member, container_id=container_id, member_id=member_id)},
-            "Container": {"identifier": container_id, "_link": API.url_for(Container, container_id=container_id)}
+            "_self": {
+                "identifier": member_id,
+                "_link": API.url_for(Member, container_id=container_id, member_id=member_id)
+            },
+            "Container": {
+                "identifier": container_id,
+                "_link": API.url_for(Container, container_id=container_id)
+            }
         }
 
 
@@ -452,13 +500,13 @@ class Version(Resource):
     def get(self):
         return {"version": __version__}
 
-# Let the application context clobber any config options here
+
 @BLUEPRINT.record
 def handle_configs(setup_state):
     app = setup_state.app
     BLUEPRINT.config.update(app.config)
-
     if BLUEPRINT.config.get('DEFER_CONFIG'):
+        log.debug("DEFER_CONFIG set, skipping configuration")
         return
 
     storage_choice = BLUEPRINT.config.get("STORAGE_BACKEND")
@@ -484,17 +532,21 @@ def handle_configs(setup_state):
     else:
         BLUEPRINT.config['storage'] = supported_backends.get(storage_choice.lower())(BLUEPRINT)
 
-    if BLUEPRINT.config.get("VERBOSITY") is None:
-        BLUEPRINT.config["VERBOSITY"] = "WARN"
-    logging.basicConfig(level=BLUEPRINT.config["VERBOSITY"])
+    if BLUEPRINT.config.get("VERBOSITY"):
+        log.debug("Setting verbosity to {}".format(str(BLUEPRINT.config['VERBOSITY'])))
+        logging.basicConfig(level=BLUEPRINT.config['VERBOSITY'])
+    else:
+        log.debug("No verbosity option set, defaulting to WARN")
+        logging.basicConfig(level="WARN")
 
 
 @BLUEPRINT.before_request
 def before_request():
     # Check to be sure all our pre-request configuration has been done.
     if not isinstance(BLUEPRINT.config.get('storage'), IStorageBackend):
-        raise RuntimeError("No storage backend is configured!")
-        abort(500)
+        print(str(BLUEPRINT.config.get('storage')))
+        raise ImproperConfigurationError()
+    print(str(BLUEPRINT.config.get('storage')))
 
 
 API.add_resource(Root, "/")

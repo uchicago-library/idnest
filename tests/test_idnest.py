@@ -1,23 +1,17 @@
 import unittest
-import json
 from uuid import uuid4
-from pymongo import MongoClient
+import json
 from os import environ
 
+from pymongo import MongoClient
+
+# Defer any configuration to the tests setUp()
 environ['IDNEST_DEFER_CONFIG'] = "True"
 
 import idnest
 
 
-class RAMIdnestTestCase(unittest.TestCase):
-    def setUp(self):
-        idnest.app.config['TESTING'] = True
-        self.app = idnest.app.test_client()
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(idnest.blueprint)
-
-    def tearDown(self):
-        pass
-
+class Mixin:
     def response_200_json(self, rv):
         self.assertEqual(rv.status_code, 200)
         rt = rv.data.decode()
@@ -218,7 +212,7 @@ class RAMIdnestTestCase(unittest.TestCase):
 
     def test_outside_pagination_range_containers(self):
         rv = self.app.get("/", data={"offset": 1001})
-        rj = self.response_200_json(rv)
+        self.response_200_json(rv)
 
     def test_outside_pagination_range_members(self):
         pass
@@ -229,37 +223,61 @@ class RAMIdnestTestCase(unittest.TestCase):
         self.assertEqual(rj['version'], idnest.blueprint.__version__)
 
 
-class MongoIdnestTestCase(RAMIdnestTestCase):
+class RAMIdnestTestCase(unittest.TestCase, Mixin):
     def setUp(self):
+        idnest.app.config['TESTING'] = True
+        self.app = idnest.app.test_client()
+        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RAMStorageBackend(
+            idnest.blueprint)
+
+    def tearDown(self):
+        del idnest.blueprint.BLUEPRINT.config['storage']
+
+
+class MongoIdnestTestCase(unittest.TestCase, Mixin):
+    def setUp(self):
+        idnest.app.config['TESTING'] = True
         self.app = idnest.app.test_client()
         idnest.blueprint.BLUEPRINT.config['MONGO_HOST'] = "localhost"
         idnest.blueprint.BLUEPRINT.config['MONGO_DB'] = "test"
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.MongoStorageBackend(idnest.blueprint.BLUEPRINT)
+        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.MongoStorageBackend(
+            idnest.blueprint.BLUEPRINT)
 
     def tearDown(self):
         c = MongoClient(idnest.blueprint.BLUEPRINT.config['MONGO_HOST'],
                         idnest.blueprint.BLUEPRINT.config.get('MONGO_PORT', 27017))
         c.drop_database(idnest.blueprint.BLUEPRINT.config['MONGO_DB'])
-        idnest.blueprint.BLUEPRINT.config['storage']
+        del idnest.blueprint.BLUEPRINT.config['storage']
 
 
-class RedisIdnestTestCase(RAMIdnestTestCase):
+class RedisIdnestTestCase(unittest.TestCase, Mixin):
     def setUp(self):
+        idnest.app.config['TESTING'] = True
         self.app = idnest.app.test_client()
         idnest.blueprint.BLUEPRINT.config['REDIS_HOST'] = "localhost"
         idnest.blueprint.BLUEPRINT.config['REDIS_DB'] = 0
-        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RedisStorageBackend(idnest.blueprint.BLUEPRINT)
+        idnest.blueprint.BLUEPRINT.config['storage'] = idnest.blueprint.RedisStorageBackend(
+            idnest.blueprint.BLUEPRINT)
 
     def tearDown(self):
         idnest.blueprint.BLUEPRINT.config['storage'].r.flushdb()
+        del idnest.blueprint.BLUEPRINT.config['storage']
 
 
 class ImproperSetupTestCase(unittest.TestCase):
+    def setUp(self):
+        idnest.app.config['TESTING'] = True
+        try:
+            del idnest.blueprint.BLUEPRINT.config['storage']
+        except KeyError:
+            pass
+        self.app = idnest.app.test_client()
+
     def test_no_storage_backend(self):
         self.app = idnest.app.test_client()
         rv = self.app.get("/")
         self.assertEqual(rv.status_code, 500)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

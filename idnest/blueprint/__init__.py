@@ -544,9 +544,7 @@ def handle_configs(setup_state):
 def before_request():
     # Check to be sure all our pre-request configuration has been done.
     if not isinstance(BLUEPRINT.config.get('storage'), IStorageBackend):
-        print(str(BLUEPRINT.config.get('storage')))
         raise ImproperConfigurationError()
-    print(str(BLUEPRINT.config.get('storage')))
 
 
 API.add_resource(Root, "/")

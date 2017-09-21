@@ -1,11 +1,10 @@
 from flask import Flask
-from .blueprint import BLUEPRINT
+from .blueprint import BLUEPRINT, __version__, __email__, __author__
 from flask_env import MetaFlaskEnv
 
 
 class Configuration(metaclass=MetaFlaskEnv):
-    ENV_PREFIX = "IDNEST_"
-
+    ENV_PREFIX = 'IDNEST_'
     DEBUG = False
     DEFER_CONFIG = False
 

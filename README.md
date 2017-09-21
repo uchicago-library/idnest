@@ -1,8 +1,23 @@
 # idnest
 
+v0.0.1
+
 [![Build Status](https://travis-ci.org/uchicago-library/idnest.svg?branch=master)](https://travis-ci.org/uchicago-library/idnest) [![Coverage Status](https://coveralls.io/repos/github/uchicago-library/idnest/badge.svg?branch=master)](https://coveralls.io/github/uchicago-library/idnest?branch=master)
 
-v0.0.1
+A RESTful API for nested identifier association
+
+# Debug Quickstart
+Set environmental variables appropriately
+```
+./debug.sh
+```
+
+# Docker Quickstart
+Inject environmental variables appropriately at either buildtime or runtime
+```
+# docker build . -t idnest
+# docker run -p 5000:80 idnest --name my_idnest
+```
 
 # Basic Usage
 
@@ -280,8 +295,30 @@ $ curl -s 127.0.0.1:5000 | python -m json.tool
 }
 ```
 
-To run tests
+# Environmental Variables
+## Required
+- IDNEST_STORAGE_CHOICE: The backend to use to store the data
+    - can be any of: redis, mongo, ram
+### Required Per IDNEST_STORAGE_CHOICE
+- redis
+    - IDNEST_REDIS_HOST: The host address of the redis server
+    - IDNEST_REDIS_DB: Which redis db to use on the server
+- mongo
+    - IDNEST_MONGO_HOST: The host address of the mongo server
+    - IDNEST_MONGO_DB: The name of the mongo db to use on the server
+-ram
+    - None
 
-```
-coverage run --source=idnest tests/tests.py && coverage report
-```
+## Optional
+- IDNEST_DEFER_CONFIG: If set _no_ automatic configuration will occur
+- IDNEST_VERBOSITY (warn): Verbosity to run logging at
+### Optional per IDNEST_STORAGE_CHOICE
+- redis
+    - IDNEST_REDIS_PORT (6379): The port the server is running on
+- mongo
+    - IDNEST_MONGO_PORT (27017): The port the server is running on
+-ram
+    - None
+
+# Author
+Brian Balsamo <balsamo@uchicago.edu>

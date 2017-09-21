@@ -1,6 +1,11 @@
 """
 idnest
 """
+
+__author__ = "Brian Balsamo"
+__email__ = "balsamo@uchicago.edu"
+__version__ = "0.0.1"
+
 from uuid import uuid4
 from abc import ABCMeta, abstractmethod
 import logging
@@ -12,11 +17,6 @@ import redis
 from pymongo import MongoClient, ASCENDING
 
 from .exceptions import Error, ImproperConfigurationError
-
-__author__ = "Brian Balsamo"
-__email__ = "balsamo@uchicago.edu"
-__version__ = "0.0.1"
-
 
 BLUEPRINT = Blueprint('idnest', __name__)
 

@@ -2,7 +2,7 @@
 
 v0.0.1
 
-[![Build Status](https://travis-ci.org/bnbalsamo/idnest.svg?branch=master)](https://travis-ci.org/bnbalsamo/idnest) [![Coverage Status](https://coveralls.io/repos/github/bnbalsamo/idnest/badge.svg?branch=master)](https://coveralls.io/github/bnbalsamo/idnest?branch=master)
+[![Build Status](https://travis-ci.org/uchicago-library/idnest.svg?branch=master)](https://travis-ci.org/uchicago-library/idnest) [![Coverage Status](https://coveralls.io/repos/github/uchicago-library/idnest/badge.svg?branch=master)](https://coveralls.io/github/uchicago-library/idnest?branch=master)
 
 A RESTful API for nested identifier association
 
